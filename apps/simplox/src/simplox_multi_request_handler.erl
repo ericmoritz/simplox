@@ -39,7 +39,7 @@ allowed_methods(Req, State) ->
 
 content_types_accepted(Req, State) ->
     {[
-     {<<"application/protobuf">>, multirequest_parser}
+     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
     ], Req, State}.
 
 
@@ -55,10 +55,6 @@ multirequest_parser(Req, State=#state{boundary=Boundary}) ->
 	     <<"multipart/mixed; boundary=", Boundary/binary>>,
 	     cowboy_req:set_resp_body_fun(StreamFun, Req3)),
     {true, Req4, State3}.
-
-log(Msg, Val) ->
-    error_logger:info_msg(Msg ++ ": ~p~n", [Val]),
-    Val.
 
 spawn_request_procs(MultiRequest, State) ->
     State#state{
@@ -114,7 +110,7 @@ stream_loop(Req, State, Socket, Transport) ->
 					     Socket, Transport, State);
 		 {http, Pid, {error, Reason}} ->
 		     send_multipart_error(Pid, Reason, Socket, Transport, State);
-		 {'DOWN', _Ref, process, Pid, normal} ->
+		 {'DOWN', _Ref, process, _Pid, normal} ->
 		     % process normal exit, just continue
 		     {continue, State};
 		 {'DOWN', _Ref, process, Pid, Reason} ->
