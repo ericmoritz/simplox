@@ -1,0 +1,16 @@
+{application, simplox,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  apptools,
+		  fn,
+		  cowboy,
+		  inets
+                 ]},
+  {mod, { simplox_app, []}},
+  {env, []}
+ ]}.

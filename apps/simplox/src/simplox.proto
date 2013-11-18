@@ -1,0 +1,26 @@
+//**
+// * These are the message types for communicating with Simplox.
+// * These messages have the following content type:
+// * Content-Type: application/protobuf+vnd.simplox.{Message Name}
+// *
+// * For instance for the MultiRequest message:
+// * Content-Type: application/protobuf+vnd.simplox.MultiRequest
+//**
+package simplox;
+
+message MultiRequest {
+  repeated Request requests = 1;
+}
+
+message Request {
+  required bytes url = 1;
+  optional bytes method = 2 [default="get"];
+  repeated Header headers = 3;
+  optional bytes content_type = 4;
+  optional bytes body = 5;
+}
+
+message Header {
+  required bytes key = 1;
+  optional bytes value = 2;
+}
