@@ -21,15 +21,23 @@ start_link(Port) ->
 %% ===================================================================
 
 init([Port]) ->
+    folsom_metrics:new_counter(multi_request_running),
+    folsom_metrics:new_histogram(multi_request_overhead),
     Dispatch = cowboy_router:compile(
 		 [
 		  {'_', [
 			 {"/service/v1/multi-request/", simplox_multi_request_handler, []}
 			]}
 		 ]),
+    ClientSup = {http_client_sup, 
+		 {http_client_sup, start_link, []}, 
+		 permanent, 1000, supervisor, 
+		 [http_client_sup]},
+
     CowboySpec = ranch:child_spec(
-		   simplox, 100, 
+		   simplox, 10, 
 		   ranch_tcp, [{port, Port}],
 		   cowboy_protocol, [{env, [{dispatch, Dispatch}]}]),
-    {ok, { {one_for_one, 5, 10}, [CowboySpec]} }.
+
+    {ok, { {one_for_one, 1000, 10}, [ClientSup, CowboySpec]} }.
 

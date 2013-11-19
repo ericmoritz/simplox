@@ -4,6 +4,7 @@
      "http://10.189.4.131/UxServices/UxFronts.svc/frontmodule/name/1/money"\
      "http://10.189.4.131/UxServices/UxFronts.svc/frontmodule/name/1/tech"\
      "http://10.189.4.131/UxServices/UxFronts.svc/frontmodule/name/1/travel" \
-    > home-fronts.msg
+    | curl -v -H "Content-Type: application/protobuf+vnd.simplox.multirequest" \
+         --data-binary @- "http://localhost:8000/service/v1/multi-request"
 
 

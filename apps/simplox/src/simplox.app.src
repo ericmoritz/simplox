@@ -9,7 +9,8 @@
 		  apptools,
 		  fn,
 		  cowboy,
-		  inets
+		  lhttpc,
+		  folsom
                  ]},
   {mod, { simplox_app, []}},
   {env, []}

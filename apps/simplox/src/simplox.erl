@@ -7,9 +7,14 @@
 
 -module(simplox).
 
--export([start/0]).
+-export([start/0, stats/0]).
 
 
 start() ->
     apptools:ensure_started(?MODULE).
 
+stats() ->
+    [
+     {multi_request_running, folsom_metrics:get_metric_value(multi_request_running)},    
+     {multi_request_overhead, folsom_metrics:get_histogram_statistics(multi_request_overhead)}].
+     
