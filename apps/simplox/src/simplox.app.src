@@ -10,6 +10,7 @@
 		  fn,
 		  cowboy,
 		  lhttpc,
+		  protobuffs,
 		  folsom
                  ]},
   {mod, { simplox_app, []}},
