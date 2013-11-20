@@ -3,3 +3,5 @@ ebin
 apps/*/ebin
 deps
 *.plt
+log/
+rel/simplox

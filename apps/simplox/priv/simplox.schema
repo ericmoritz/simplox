@@ -1,0 +1,40 @@
+%% -*- erlang -*-
+
+%% @doc HTTP ip to bind to
+{mapping,  "http.ip",  "simplox.http",
+ [
+  {default, "0.0.0.0"}
+  % TODO: Add an ip validator
+ ]
+}.
+
+%% @doc HTTP port to bind to 
+{mapping,  "http.port",  "simplox.http",
+ [
+  {datatype, integer},
+  {default, 8000}
+ ]
+}.
+
+{translation,
+ "simplox.http",
+ fun(Conf) ->
+	 {ok, IP} = inet_parse:address(cuttlefish_util:conf_get_value("http.ip", Conf)),
+	 Port = cuttlefish_util:conf_get_value("http.port", Conf),
+	 [{ip, IP}, {port, Port}]
+ end}.
+
+%% @doc Number of acceptor processes to start
+{mapping,
+ "http.acceptors",
+ "simplox.acceptors",
+ [
+  {datatype, integer},
+  {default, 100}
+]}.
+
+%% @doc Cookie for distributed node communication.  All nodes in the same cluster
+%% should use the same cookie or they will not be able to communicate.
+{mapping, "distributed_cookie", "vm_args.-setcookie", [
+  {default, "simplox"}
+]}.

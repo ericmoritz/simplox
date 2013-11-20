@@ -11,6 +11,7 @@
 -module(simplox_multi_request_handler).
 
 -record(state, {boundary, multirequest, procs=dict:new()}).
+-record(proc_item, {request_msg, start}).
 
 -define(CRLF, <<"\r\n">>).
 -include_lib("simplox/include/simplox_pb.hrl").
@@ -24,7 +25,8 @@
 	 multirequest_parser/2,
 	 html_get_response/2,
 	 streaming_multipart_response/2,
-	 send_multipart_response/7
+	 send_multipart_response/7,
+	 rest_terminate/2
 	]).
 
 
@@ -45,16 +47,26 @@ content_types_accepted(Req, State) ->
 
 multirequest_parser(Req, State=#state{boundary=Boundary}) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
-    MultiRequest = simplox_pb:decode_multirequest(Body),
-    State2 = spawn_request_procs(MultiRequest, State),
-    %%% It seems like I have to manually do this for POSTs... though I may be doing
-    %%% something wrong.
-    {{stream, StreamFun}, Req3, State3} = streaming_multipart_response(Req2, State2),
-    Req4 = cowboy_req:set_resp_header(
-	     <<"content-type">>,
-	     <<"multipart/mixed; boundary=", Boundary/binary>>,
-	     cowboy_req:set_resp_body_fun(StreamFun, Req3)),
-    {true, Req4, State3}.
+    case decode_multirequest(Body) of 
+	{error, _Reason} ->
+	    {false, Req2, State};
+	{ok, MultiRequest} -> 
+	    State2 = spawn_request_procs(MultiRequest, State),
+            {{stream, StreamFun}, Req3, State3} = streaming_multipart_response(Req2, State2),
+            Req4 = cowboy_req:set_resp_header(
+	       <<"content-type">>,
+	       <<"multipart/mixed; boundary=", Boundary/binary>>,
+	       cowboy_req:set_resp_body_fun(StreamFun, Req3)),
+               {true, Req4, State3}
+    end.
+
+decode_multirequest(Body) ->
+    try     
+	Msg = simplox_pb:decode_multirequest(Body),
+	{ok, Msg}
+    catch Error ->
+	    {error, Error}
+    end.
 
 spawn_request_procs(MultiRequest, State) ->
     State#state{
@@ -65,9 +77,10 @@ spawn_request_procs(MultiRequest, State) ->
 
 spawn_request(RequestMessage) ->
     Self = self(),
-    Pid = http_client:start(Self, RequestMessage),
+    Start = os:timestamp(),
+    {ok, Pid} = http_client_sup:start_child(Self, RequestMessage),
     monitor(process, Pid),
-    {Pid, RequestMessage}.
+    {Pid, #proc_item{request_msg=RequestMessage, start=Start}}.
 
 
 content_types_provided(Req, State) ->
@@ -85,12 +98,17 @@ content_types_provided(Req, State) ->
     end.
 
 
+rest_terminate(_Req, _State) ->
+    ok.
+
 html_get_response(Req, State) ->
     Body = <<"<html>
 <body>
 <p>Hello, World!</p>
 </body></html>">>,
     {Body, Req, State}.
+
+
 
 
 streaming_multipart_response(Req, State) ->
@@ -102,18 +120,19 @@ multipart_streamer(Req, State) ->
 	    stream_loop(Req, State, Socket, Transport)
     end.
 
-
 stream_loop(Req, State, Socket, Transport) ->
     Result = receive 
-		 {http, Pid, {ok, {Status, Headers, Body}}} ->
+		 {http, Pid, {ok, {Status, Headers, Body}}, Props} ->
+		     record_request_time(Pid, Props, State),
 		     send_multipart_response(Pid, Status, Headers, Body, 
 					     Socket, Transport, State);
-		 {http, Pid, {error, Reason}} ->
+		 {http, Pid, {error, Reason}, Props} ->
+		     record_request_time(Pid, Props, State),
 		     send_multipart_error(Pid, Reason, Socket, Transport, State);
 		 {'DOWN', _Ref, process, _Pid, normal} ->
-		     % process normal exit, just continue
 		     {continue, State};
 		 {'DOWN', _Ref, process, Pid, Reason} ->
+		     error_logger:error_msg("Client crash: ~p~n", [Reason]),
 		     send_multipart_error(Pid, Reason, Socket, Transport, State)
 	     after 6000 ->
 		     io:format("Timeout waiting for responses", []),
@@ -126,20 +145,29 @@ stream_loop(Req, State, Socket, Transport) ->
 	    ok
     end.
 				  
+record_request_time(Pid, Props, #state{procs=Procs}) ->
+    End = os:timestamp(),
+    #proc_item{start=Start} = dict:fetch(Pid, Procs),
+    RequestTime = proplists:get_value(time, Props, 0),
+    Overhead = timer:now_diff(End, Start) - RequestTime,
+    folsom_metrics:notify({multi_request_overhead, Overhead}).
+	
+    
+
 send_multipart_response(Pid, Status, Headers, Body, Socket, Transport, State) ->
-    RequestMessage = dict:fetch(Pid, State#state.procs),
+    #proc_item{request_msg=RequestMessage} = dict:fetch(
+					       Pid, 
+					       State#state.procs
+					      ),
     IOData = [
 	      <<"--">>, State#state.boundary, ?CRLF,
-	      header({<<"X-Status">>, status_to_iolist(Status)}),
+	      header({<<"X-Status">>, Status}),
 	      header({<<"Content-Location">>, RequestMessage#request.url}),
 	      lists:map(fun header/1, Headers),
 	      ?CRLF, ?CRLF, 
 	      Body],
     Transport:send(Socket, IOData),
     after_multipart_response(Pid, State).
-
-status_to_iolist({Version, Code, Phrase}) ->
-    [Version, " ", integer_to_list(Code), " ", Phrase].
 
 
 send_multipart_error(Pid, Reason, Socket, Transport, State) ->
@@ -169,3 +197,4 @@ header({Name, Value}) ->
 make_boundary() ->
     % TODO: Do a random boundary function
     <<"gc0p4Jq0M2Yt08jU534c0p">>.
+
