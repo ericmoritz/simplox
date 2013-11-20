@@ -1,4 +1,5 @@
 PROJECT=simplox
+VERSION=1
 PLT_APPS=ssl crypto public_key
 SRC = apps/*/src deps/cowboy/src deps/ranch/src
 EBIN = apps/*/ebin deps/*/ebin

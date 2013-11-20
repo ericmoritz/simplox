@@ -1,3 +1,4 @@
+PKG_ID=$(PROJECT)-$(VERSION)
 PLT_APPS ?=
 SRC ?= src
 EBIN ?= ebin deps/*/ebin

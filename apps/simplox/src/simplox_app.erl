@@ -11,28 +11,8 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    Port = port(),
-    simplox_sup:start_link(Port).
+    simplox_sup:start_link(simplox_conf:init()).
 
 stop(_State) ->
     ok.
-
-
-%% ===================================================================
-%% Internal
-%% ===================================================================
--spec port() -> integer().
-port() ->
-    port(
-      os:getenv("PORT"),
-      application:get_env(?APP, port)
-     ).
-
-port(false, undefined) ->
-    8000;
-port(OSVar, undefined) ->
-    list_to_integer(OSVar);
-port(_, AppVar) ->
-    AppVar.
-
 

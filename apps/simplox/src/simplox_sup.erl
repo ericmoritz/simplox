@@ -1,6 +1,6 @@
 
 -module(simplox_sup).
-
+-compile([{parse_transform, lager_transform}]).
 -behaviour(supervisor).
 
 %% API
@@ -13,17 +13,17 @@
 %% API functions
 %% ===================================================================
 
-start_link(Port) ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, [Port]).
+start_link(Conf) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [Conf]).
 
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
-
-init([Port]) ->
+init([Conf]) ->
     lager:start(),
     folsom_metrics:new_counter(multi_request_running),
     folsom_metrics:new_histogram(multi_request_overhead),
+
 
     Dispatch = cowboy_router:compile(
 		 [
@@ -35,11 +35,11 @@ init([Port]) ->
 		 {http_client_sup, start_link, []}, 
 		 permanent, 1000, supervisor, 
 		 [http_client_sup]},
-
+    RanchProps = simplox_conf:http_ranch_tcp(Conf),
     CowboySpec = ranch:child_spec(
-		   simplox, 10, 
-		   ranch_tcp, [{port, Port}],
+		   simplox, simplox_conf:acceptors(Conf), 
+		   ranch_tcp, RanchProps,
 		   cowboy_protocol, [{env, [{dispatch, Dispatch}]}]),
-
+    lager:info("Listening on ~p", [RanchProps]),
     {ok, { {one_for_one, 1000, 10}, [ClientSup, CowboySpec]} }.
 
