@@ -47,16 +47,26 @@ content_types_accepted(Req, State) ->
 
 multirequest_parser(Req, State=#state{boundary=Boundary}) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
-    MultiRequest = simplox_pb:decode_multirequest(Body),
-    State2 = spawn_request_procs(MultiRequest, State),
-    %%% It seems like I have to manually do this for POSTs... though I may be doing
-    %%% something wrong.
-    {{stream, StreamFun}, Req3, State3} = streaming_multipart_response(Req2, State2),
-    Req4 = cowboy_req:set_resp_header(
-	     <<"content-type">>,
-	     <<"multipart/mixed; boundary=", Boundary/binary>>,
-	     cowboy_req:set_resp_body_fun(StreamFun, Req3)),
-    {true, Req4, State3}.
+    case decode_multirequest(Body) of 
+	{error, _Reason} ->
+	    {false, Req2, State};
+	{ok, MultiRequest} -> 
+	    State2 = spawn_request_procs(MultiRequest, State),
+            {{stream, StreamFun}, Req3, State3} = streaming_multipart_response(Req2, State2),
+            Req4 = cowboy_req:set_resp_header(
+	       <<"content-type">>,
+	       <<"multipart/mixed; boundary=", Boundary/binary>>,
+	       cowboy_req:set_resp_body_fun(StreamFun, Req3)),
+               {true, Req4, State3}
+    end.
+
+decode_multirequest(Body) ->
+    try     
+	Msg = simplox_pb:decode_multirequest(Body),
+	{ok, Msg}
+    catch Error ->
+	    {error, Error}
+    end.
 
 spawn_request_procs(MultiRequest, State) ->
     State#state{
