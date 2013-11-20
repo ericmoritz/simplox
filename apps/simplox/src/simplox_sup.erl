@@ -21,12 +21,14 @@ start_link(Port) ->
 %% ===================================================================
 
 init([Port]) ->
+    lager:start(),
     folsom_metrics:new_counter(multi_request_running),
     folsom_metrics:new_histogram(multi_request_overhead),
+
     Dispatch = cowboy_router:compile(
 		 [
 		  {'_', [
-			 {"/service/v1/multi-request/", simplox_multi_request_handler, []}
+			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []}
 			]}
 		 ]),
     ClientSup = {http_client_sup, 
