@@ -50,9 +50,11 @@ content_types_accepted(Req, State) ->
 echo_parser(Req2, State=#state{boundary=Boundary}) ->
     Req3 = cowboy_req:set_resp_body(dummy_data(),
 				    cowboy_req:set_resp_header(
+				      <<"transfer-encoding">>, <<"identity">>,
+				      cowboy_req:set_resp_header(
 				      <<"content-type">>,
 				      <<"multipart/mixed; boundary=", Boundary/binary>>,
-				      Req2)),
+				      Req2))),
     {true, Req3, State}.
 
 resource_exists(Req, State) ->
