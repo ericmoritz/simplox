@@ -49,6 +49,7 @@ content_types_accepted(Req, State) ->
 
 echo_parser(Req, State) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
+    lhttpc:request("http://httpbin.org/get", get, [], 6000),
     Req3 = cowboy_req:set_resp_body(Body, Req2),
     {true, Req3, State}.
 
