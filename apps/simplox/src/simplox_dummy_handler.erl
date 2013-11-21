@@ -42,34 +42,13 @@ allowed_methods(Req, State) ->
 content_types_accepted(Req, State) ->
     {[
      {<<"text/plain">>, echo_parser},
-     {<<"application/protobuf">>, echo_parser}, %% for heroku
-     {<<"application/protobuf+vnd.simplox.multirequest">>, echo_parser}
+     {<<"application/protobuf">>, multirequest_parser}, %% for heroku
+     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
     ], Req, State}.
 
 
 echo_parser(Req2, State=#state{boundary=Boundary}) ->
-    IOData= [<<"--gc0p4Jq0M2Yt08jU534c0p
-X-Status: 200
-Content-Location: http://httpbin.org/get
-Connection: keep-alive
-Content-Length: 152
-Server: gunicorn/0.17.4
-Date: Thu, 21 Nov 2013 17:00:33 GMT
-Content-Type: application/json
-Access-Control-Allow-Origin: *
-
-
-{
-  \"args\": {},
-  \"headers\": {
-    \"Host\": \"httpbin.org\",
-    \"Connection\": \"close\"
-  },
-  \"url\": \"http://httpbin.org/get\",
-  \"origin\": \"159.54.131.7\"
-}
-">>],
-    Req3 = cowboy_req:set_resp_body(IOData,
+    Req3 = cowboy_req:set_resp_body(dummy_data(),
 				    cowboy_req:set_resp_header(
 				      <<"content-type">>,
 				      <<"multipart/mixed; boundary=", Boundary/binary>>,
@@ -79,7 +58,7 @@ Access-Control-Allow-Origin: *
 resource_exists(Req, State) ->
     {true, Req, State}.
 
-multirequest_parser(Req, State) ->
+multirequest_parser(Req, State=#state{boundary=Boundary}) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
     case decode_multirequest(Body) of 
 	{error, _Reason} ->
@@ -88,7 +67,7 @@ multirequest_parser(Req, State) ->
             {{stream, StreamFun}, Req3, State2} = streaming_multipart_response(Req2, State),
             Req4 = cowboy_req:set_resp_header(
 	       <<"content-type">>,
-	       <<"text/plain">>,
+	       <<"multipart/mixed; boundary=", Boundary/binary>>,
 	       cowboy_req:set_resp_body_fun(StreamFun, Req3)),
                {true, Req4, State2}
     end.
@@ -139,7 +118,7 @@ multipart_streamer(Req, State) ->
     end.
 
 stream_loop(_Req, _State, Socket, Transport) ->
-    Transport:send(Socket, <<"Hello, World!">>),
+    Transport:send(Socket, dummy_data()),
     ok.
 
 
@@ -150,3 +129,24 @@ make_boundary() ->
 header({Name, Value}) ->
     [Name, ": ", Value, ?CRLF].
 
+dummy_data() ->
+    <<"--gc0p4Jq0M2Yt08jU534c0p
+X-Status: 200
+Content-Location: http://httpbin.org/get
+Connection: keep-alive
+Content-Length: 152
+Server: gunicorn/0.17.4
+Date: Thu, 21 Nov 2013 17:00:33 GMT
+Content-Type: application/json
+Access-Control-Allow-Origin: *
+
+
+{
+  \"args\": {},
+  \"headers\": {
+    \"Host\": \"httpbin.org\",
+    \"Connection\": \"close\"
+  },
+  \"url\": \"http://httpbin.org/get\",
+  \"origin\": \"159.54.131.7\"
+}">>.
