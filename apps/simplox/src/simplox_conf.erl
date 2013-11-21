@@ -29,9 +29,10 @@ http_ranch_tcp(Conf) ->
 	false ->
 	    get_value(http, Conf);
 	PortStr ->
-	    list_to_integer(PortStr)
+	    [{ip, {127,0,0,1}}, {port, list_to_integer(PortStr)}]
     end.
 
 
 get_value(Key, Conf) ->
     proplists:get_value(Key, Conf).
+
