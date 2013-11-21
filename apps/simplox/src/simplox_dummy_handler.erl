@@ -11,7 +11,6 @@
 -module(simplox_dummy_handler).
 
 -record(state, {boundary, multirequest, procs=dict:new()}).
--record(proc_item, {request_msg, start}).
 
 -define(CRLF, <<"\r\n">>).
 -include_lib("simplox/include/simplox_pb.hrl").
@@ -22,7 +21,9 @@
 	 allowed_methods/2,
 	 content_types_provided/2, 
 	 content_types_accepted/2,
+	 resource_exists/2,
 	 multirequest_parser/2,
+	 echo_parser/2,
 	 html_get_response/2,
 	 streaming_multipart_response/2,
 	 rest_terminate/2
@@ -40,17 +41,26 @@ allowed_methods(Req, State) ->
 
 content_types_accepted(Req, State) ->
     {[
+     {<<"text/plain">>, echo_parser},
      {<<"application/protobuf">>, multirequest_parser}, %% for heroku
      {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
     ], Req, State}.
 
 
-multirequest_parser(Req, State=#state{boundary=Boundary}) ->
+echo_parser(Req, State) ->
+    {ok, Body, Req2} = cowboy_req:body(Req),
+    Req3 = cowboy_req:set_resp_body(Body, Req2),
+    {true, Req3, State}.
+
+resource_exists(Req, State) ->
+    {true, Req, State}.
+
+multirequest_parser(Req, State) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
     case decode_multirequest(Body) of 
 	{error, _Reason} ->
 	    {false, Req2, State};
-	{ok, MultiRequest} -> 
+	{ok, _MultiRequest} -> 
             {{stream, StreamFun}, Req3, State2} = streaming_multipart_response(Req2, State),
             Req4 = cowboy_req:set_resp_header(
 	       <<"content-type">>,
@@ -66,21 +76,6 @@ decode_multirequest(Body) ->
     catch Error ->
 	    {error, Error}
     end.
-
-spawn_request_procs(MultiRequest, State) ->
-    State#state{
-      multirequest=MultiRequest,
-      procs=dict:from_list(lists:map(fun spawn_request/1, 
-				     MultiRequest#multirequest.requests))}.
-
-
-spawn_request(RequestMessage) ->
-    Self = self(),
-    Start = os:timestamp(),
-    {ok, Pid} = http_client_sup:start_child(Self, RequestMessage),
-    monitor(process, Pid),
-    {Pid, #proc_item{request_msg=RequestMessage, start=Start}}.
-
 
 content_types_provided(Req, State) ->
     case cowboy_req:method(Req) of
@@ -119,12 +114,9 @@ multipart_streamer(Req, State) ->
 	    stream_loop(Req, State, Socket, Transport)
     end.
 
-stream_loop(Req, State, Socket, Transport) ->
+stream_loop(_Req, _State, Socket, Transport) ->
     Transport:send(Socket, <<"Hello, World!">>),
     ok.
-
-header({Name, Value}) ->
-    [Name, ": ", Value, ?CRLF].
 
 
 make_boundary() ->
