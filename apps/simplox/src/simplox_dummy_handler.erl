@@ -42,8 +42,8 @@ allowed_methods(Req, State) ->
 content_types_accepted(Req, State) ->
     {[
      {<<"text/plain">>, echo_parser},
-     {<<"application/protobuf">>, multirequest_parser}, %% for heroku
-     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
+     {<<"application/protobuf">>, echo_parser}, %% for heroku
+     {<<"application/protobuf+vnd.simplox.multirequest">>, echo_parser}
     ], Req, State}.
 
 
