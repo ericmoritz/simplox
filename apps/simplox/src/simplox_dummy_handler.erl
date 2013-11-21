@@ -86,7 +86,7 @@ content_types_provided(Req, State) ->
 	    State1 = State#state{boundary=Boundary},
 	    {[
 	      %% TODO: Make boundary work.
-	      {{<<"multipart">>, <<"mixed">>, '*'},
+	      {<<"text/plain">>,
 	       streaming_multipart_response}
 	     ], Req1, State1}
     end.
