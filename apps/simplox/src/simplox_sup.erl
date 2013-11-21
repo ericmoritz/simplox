@@ -28,8 +28,8 @@ init([Conf]) ->
     Dispatch = cowboy_router:compile(
 		 [
 		  {'_', [
-			 {"/simplox/v1/multi-request/", 
-			  simplox_multi_request_handler, []}
+			 {"/simplox/v1/dummy/", simplox_dummy_handler, []},
+			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []}
 			]}
 		 ]),
     ClientSup = {http_client_sup, 
