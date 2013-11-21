@@ -135,9 +135,6 @@ make_boundary() ->
     % TODO: Do a random boundary function
     <<"gc0p4Jq0M2Yt08jU534c0p">>.
 
-header({Name, Value}) ->
-    [Name, ": ", Value, ?CRLF].
-
 dummy_data() ->
     <<"--gc0p4Jq0M2Yt08jU534c0p
 X-Status: 200

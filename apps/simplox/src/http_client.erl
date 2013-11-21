@@ -6,6 +6,7 @@
 %%% Created : 15 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
 -module(http_client).
 -behaviour(gen_server).
+-define(CLIENT, ibrowse).
 
 -include_lib("simplox/include/simplox_pb.hrl").
 
@@ -153,11 +154,20 @@ make_request(TargetPid, RequestMessage) ->
 send_req(Url, Headers, Method, undefined) ->
     send_req(Url, Headers, Method, []);
 send_req(Url, Headers, Method, Body) ->
-    reply(lhttpc:request(Url, Method, Headers, Body, infinity)).
+    reply(send_req(?CLIENT, Url, Headers, Method, Body)).
+
+send_req(lhttpc, Url, Headers, Method, Body) ->
+    lhttpc:request(Url, Method, Headers, Body, infinity);    
+send_req(ibrowse, Url, Headers, Method, Body) ->
+    ibrowse:send_req(Url, Headers, Method, Body, [{response_format, binary}]).
+
+
 
 %%% Normalize the reply for the various http clients
 reply({ok, {{StatusCode, _ReasonPhrase}, Headers, Body}}) -> % lhttpc
     {ok, {integer_to_list(StatusCode), Headers, Body}};
+reply({ok, StatusCode, Headers, Body}) -> % ibrowse
+    {ok, {StatusCode, Headers, Body}};
 reply(E={error, _}) ->
     E.
 
