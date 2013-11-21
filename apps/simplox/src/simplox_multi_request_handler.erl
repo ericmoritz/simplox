@@ -25,7 +25,7 @@
 	 multirequest_parser/2,
 	 html_get_response/2,
 	 streaming_multipart_response/2,
-	 send_multipart_response/7,
+	 send_multipart_response/6,
 	 rest_terminate/2
 	]).
 
@@ -57,7 +57,7 @@ multirequest_parser(Req, State=#state{boundary=Boundary}) ->
             Req4 = cowboy_req:set_resp_header(
 	       <<"content-type">>,
 	       <<"multipart/mixed; boundary=", Boundary/binary>>,
-	       cowboy_req:set_resp_body_fun(StreamFun, Req3)),
+	       cowboy_req:set_resp_body_fun(chunked, StreamFun, Req3)),
                {true, Req4, State3}
     end.
 
@@ -117,31 +117,31 @@ streaming_multipart_response(Req, State) ->
 
 
 multipart_streamer(Req, State) ->
-    fun(Socket, Transport) ->
-	    stream_loop(Req, State, Socket, Transport)
+    fun(F) ->
+	    stream_loop(Req, State, F)
     end.
 
-stream_loop(Req, State, Socket, Transport) ->
+stream_loop(Req, State, F) ->
     Result = receive 
 		 {http, Pid, {ok, {Status, Headers, Body}}, Props} ->
 		     record_request_time(Pid, Props, State),
 		     send_multipart_response(Pid, Status, Headers, Body, 
-					     Socket, Transport, State);
+					     F, State);
 		 {http, Pid, {error, Reason}, Props} ->
 		     record_request_time(Pid, Props, State),
-		     send_multipart_error(Pid, Reason, Socket, Transport, State);
+		     send_multipart_error(Pid, Reason, F, State);
 		 {'DOWN', _Ref, process, _Pid, normal} ->
 		     {continue, State};
 		 {'DOWN', _Ref, process, Pid, Reason} ->
 		     error_logger:error_msg("Client crash: ~p~n", [Reason]),
-		     send_multipart_error(Pid, Reason, Socket, Transport, State)
+		     send_multipart_error(Pid, Reason, F, State)
 	     after 6000 ->
 		     io:format("Timeout waiting for responses", []),
 		     {done, State}
  	     end,
     case Result of
 	{continue, State2} ->
-	    stream_loop(Req, State2, Socket, Transport);
+	    stream_loop(Req, State2, F);
 	{done, _State2} ->
 	    ok
     end.
@@ -155,7 +155,7 @@ record_request_time(Pid, Props, #state{procs=Procs}) ->
 	
     
 
-send_multipart_response(Pid, Status, Headers, Body, Socket, Transport, State) ->
+send_multipart_response(Pid, Status, Headers, Body, F, State) ->
     #proc_item{request_msg=RequestMessage} = dict:fetch(
 					       Pid, 
 					       State#state.procs
@@ -167,18 +167,17 @@ send_multipart_response(Pid, Status, Headers, Body, Socket, Transport, State) ->
 	      lists:map(fun header/1, Headers),
 	      ?CRLF, ?CRLF, 
 	      Body],
-    Transport:send(Socket, IOData),
+    F(IOData),
     after_multipart_response(Pid, State).
 
 
-send_multipart_error(Pid, Reason, Socket, Transport, State) ->
+send_multipart_error(Pid, Reason, F, State) ->
     send_multipart_response(
       Pid, 
       {"HTTP/1.1", 502, "Bad Gateway"}, 
       [{<<"Content-Type">>, <<"text/plain">>}], 
       io_lib:format("~p", [Reason]),
-      Socket,
-      Transport,
+      F,
       State).
 
     

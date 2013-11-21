@@ -77,7 +77,7 @@ multirequest_parser(Req, State=#state{boundary=Boundary}) ->
 		     cowboy_req:set_resp_header(
 	       <<"content-type">>,
 	       <<"multipart/mixed; boundary=", Boundary/binary>>,
-	       cowboy_req:set_resp_body_fun(StreamFun, Req3))),
+	       cowboy_req:set_resp_body_fun(chunked, StreamFun, Req3))),
                {true, Req4, State2}
     end.
 
@@ -122,12 +122,12 @@ streaming_multipart_response(Req, State) ->
 
 
 multipart_streamer(Req, State) ->
-    fun(Socket, Transport) ->
-	    stream_loop(Req, State, Socket, Transport)
+    fun(F) ->
+	    stream_loop(Req, State, F)
     end.
 
-stream_loop(_Req, _State, Socket, Transport) ->
-    Transport:send(Socket, dummy_data()),
+stream_loop(_Req, _State, F) ->
+    F(dummy_data()),
     ok.
 
 
