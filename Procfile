@@ -1,1 +1,1 @@
-web: erl -pa deps/*/ebin apps/*/ebin -noshell -noinput -s simplox
+web: erl -pa apps/*/ebin deps/*/ebin -noshell -noinput -s simplox
