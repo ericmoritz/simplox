@@ -47,15 +47,28 @@ content_types_accepted(Req, State) ->
     ], Req, State}.
 
 
-echo_parser(Req, State=#state{boundary=Boundary}) ->
-    {ok, Body, Req2} = cowboy_req:body(Req),
-    IOData = [
-	      <<"--">>, State#state.boundary, ?CRLF,
-	      header({<<"X-Status">>, "200"}),
-	      header({<<"Content-Location">>, <<"http://example.com">>}),
-	      ?CRLF, ?CRLF, 
-	      Body],
+echo_parser(Req2, State=#state{boundary=Boundary}) ->
+    IOData= [<<"--gc0p4Jq0M2Yt08jU534c0p
+X-Status: 200
+Content-Location: http://httpbin.org/get
+Connection: keep-alive
+Content-Length: 152
+Server: gunicorn/0.17.4
+Date: Thu, 21 Nov 2013 17:00:33 GMT
+Content-Type: application/json
+Access-Control-Allow-Origin: *
 
+
+{
+  \"args\": {},
+  \"headers\": {
+    \"Host\": \"httpbin.org\",
+    \"Connection\": \"close\"
+  },
+  \"url\": \"http://httpbin.org/get\",
+  \"origin\": \"159.54.131.7\"
+}
+">>],
     Req3 = cowboy_req:set_resp_body(IOData,
 				    cowboy_req:set_resp_header(
 				      <<"content-type">>,
