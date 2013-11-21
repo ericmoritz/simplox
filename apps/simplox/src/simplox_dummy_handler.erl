@@ -47,10 +47,20 @@ content_types_accepted(Req, State) ->
     ], Req, State}.
 
 
-echo_parser(Req, State) ->
+echo_parser(Req, State=#state{boundary=Boundary}) ->
     {ok, Body, Req2} = cowboy_req:body(Req),
-    lhttpc:request("http://httpbin.org/get", get, [], 6000),
-    Req3 = cowboy_req:set_resp_body(Body, Req2),
+    IOData = [
+	      <<"--">>, State#state.boundary, ?CRLF,
+	      header({<<"X-Status">>, "200"}),
+	      header({<<"Content-Location">>, <<"http://example.com">>}),
+	      ?CRLF, ?CRLF, 
+	      Body],
+
+    Req3 = cowboy_req:set_resp_body(IOData,
+				    cowboy_req:set_resp_header(
+				      <<"content-type">>,
+				      <<"multipart/mixed; boundary=", Boundary/binary>>,
+				      Req2)),
     {true, Req3, State}.
 
 resource_exists(Req, State) ->
@@ -123,4 +133,7 @@ stream_loop(_Req, _State, Socket, Transport) ->
 make_boundary() ->
     % TODO: Do a random boundary function
     <<"gc0p4Jq0M2Yt08jU534c0p">>.
+
+header({Name, Value}) ->
+    [Name, ": ", Value, ?CRLF].
 

@@ -194,7 +194,6 @@ after_multipart_response(Pid, State) ->
 header({Name, Value}) ->
     [Name, ": ", Value, ?CRLF].
 
-
 make_boundary() ->
     % TODO: Do a random boundary function
     <<"gc0p4Jq0M2Yt08jU534c0p">>.
