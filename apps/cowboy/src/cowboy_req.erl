@@ -963,6 +963,7 @@ reply(Status, Headers, Body, Req=#http_req{
 						{<<"connection">>, <<"close">>},
 						{<<"date">>, cowboy_clock:rfc1123()},
 						{<<"server">>, <<"Cowboy">>}
+						{<<"transfer-encoding">>, <<"Identity">>}
 					], <<>>, Req)
 			end,
 			if	RespType =/= hook, Method =/= <<"HEAD">> ->
