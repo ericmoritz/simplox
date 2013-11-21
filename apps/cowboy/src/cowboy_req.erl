@@ -962,7 +962,7 @@ reply(Status, Headers, Body, Req=#http_req{
 					response(Status, Headers, RespHeaders, [
 						{<<"connection">>, <<"close">>},
 						{<<"date">>, cowboy_clock:rfc1123()},
-						{<<"server">>, <<"Cowboy">>}
+						{<<"server">>, <<"Cowboy">>},
 						{<<"transfer-encoding">>, <<"Identity">>}
 					], <<>>, Req)
 			end,
