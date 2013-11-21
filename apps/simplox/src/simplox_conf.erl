@@ -29,7 +29,7 @@ http_ranch_tcp(Conf) ->
 	false ->
 	    get_value(http, Conf);
 	PortStr ->
-	    [{ip, {127,0,0,1}}, {port, list_to_integer(PortStr)}]
+	    [{port, list_to_integer(PortStr)}]
     end.
 
 
