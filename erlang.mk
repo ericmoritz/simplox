@@ -32,6 +32,10 @@ rel: compile
 relclean:
 	rm -rf rel/$(PROJECT)
 
+rel-shell: 
+	rel/${PROJECT}/bin/${PROJECT} console
+
+
 # Dialyzer.
 
 .$(PROJECT).plt:
