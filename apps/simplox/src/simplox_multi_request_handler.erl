@@ -182,12 +182,12 @@ send_response(Pid, {Status, Headers, Body}, Props, F, State) ->
 
 
 %% This will change based on the media type
-encode_response({_Status, Headers, _Body}, State) ->
+encode_response({_Status, Headers, Body}, State) ->
     [
      ?CRLF, <<"--">>, State#state.boundary, ?CRLF,
      lists:map(fun header/1, Headers),
      ?CRLF, ?CRLF, 
-     <<>>].
+     Body].
 
 
 send_error(Pid, Reason, Props, F, State) ->
