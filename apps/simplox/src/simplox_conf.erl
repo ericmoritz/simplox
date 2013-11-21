@@ -24,7 +24,13 @@ acceptors(Conf) ->
 
 -spec http_ranch_tcp(config()) -> proplist().
 http_ranch_tcp(Conf) ->
-    get_value(http, Conf).
+    %% Allow for $PORT env override, this is for Heroku mainly
+    case os:getenv("PORT") of
+	false ->
+	    get_value(http, Conf);
+	PortStr ->
+	    list_to_integer(PortStr)
+    end.
 
 
 get_value(Key, Conf) ->
