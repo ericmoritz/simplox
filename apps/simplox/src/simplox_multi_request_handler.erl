@@ -161,7 +161,7 @@ send_multipart_response(Pid, Status, Headers, Body, F, State) ->
 					       State#state.procs
 					      ),
     IOData = [
-	      <<"--">>, State#state.boundary, ?CRLF,
+	      ?CRLF, <<"--">>, State#state.boundary, ?CRLF,
 	      header({<<"X-Status">>, Status}),
 	      header({<<"Content-Location">>, RequestMessage#request.url}),
 	      lists:map(fun header/1, Headers),
