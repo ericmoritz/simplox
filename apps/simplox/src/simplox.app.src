@@ -10,7 +10,7 @@
 		  apptools,
 		  fn,
 		  cowboy,
-		  lhttpc,
+		  ibrowse,
 		  protobuffs,
 		  folsom
                  ]},
