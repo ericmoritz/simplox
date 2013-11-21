@@ -41,6 +41,7 @@ allowed_methods(Req, State) ->
 
 content_types_accepted(Req, State) ->
     {[
+     {<<"application/protobuf">>, multirequest_parser}, %% for heroku
      {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
     ], Req, State}.
 
@@ -192,7 +193,6 @@ after_multipart_response(Pid, State) ->
 
 header({Name, Value}) ->
     [Name, ": ", Value, ?CRLF].
-
 
 make_boundary() ->
     % TODO: Do a random boundary function
