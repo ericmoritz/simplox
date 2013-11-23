@@ -1,17 +1,17 @@
 %%%-------------------------------------------------------------------
-%%% @author Moritz <emoritz@usat-babramson.usatoday.us.ad.gannett.com>
-%%% @copyright (C) 2013, Moritz
+%%% @author Eric Moritz <eric@themoritzfamily.com>
+%%% @copyright (C) 2013, Eric Moritz
 %%% @doc
-%%% A simple one-to-one sup for the http_request processes
+%%% This sups the multirequest server and its clients
 %%% @end
-%%% Created : 19 Nov 2013 by Moritz <emoritz@usat-babramson.usatoday.us.ad.gannett.com>
+%%% Created : 23 Nov 2013 by Eric Moritz <eric@themoritzfamily.com>
 %%%-------------------------------------------------------------------
--module(http_client_sup).
+-module(simplox_multirequest_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_child/3]).
+-export([start_link/0, multirequest_pid/1, client_sup_pid/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -30,18 +30,13 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    supervisor:start_link(?MODULE, []).
+    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts a request
-%%
-%% @spec start_child(TargetPid, RequestMessage) -> {ok, Pid} | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start_child(SupPid, TargetPid, RequestMessage) ->
-    supervisor:start_child(SupPid, [TargetPid, RequestMessage]).
+multirequest_pid(SupPid) ->
+    first(find_children(SupPid, simplox_multirequest_server)).
 
+client_sup_pid(SupPid) ->
+    first(find_children(SupPid, http_client_sup)).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -61,23 +56,37 @@ start_child(SupPid, TargetPid, RequestMessage) ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    RestartStrategy = simple_one_for_one,
+    RestartStrategy = one_for_all,
+
+    % we don't restart a multirequest, it just crashes
+    % in the future we may want to add retries, but I doubt
+    % that it is possible to generalize
     MaxRestarts = 0,
     MaxSecondsBetweenRestarts = 1,
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    % may use 'transient' to add retries, but we'll hold off on that for
-    % now.
-    Restart = temporary, 
-    Shutdown = brutal_kill,
-    Type = worker,
 
-    AChild = {http_client, {http_client, start_link, []},
-	      Restart, Shutdown, Type, [http_client]},
+    MultiRequestChild = {simplox_multirequest_server,
+			 {simplox_multirequest_server, start_link, []},
+			 permanent, 1000, worker, 
+			 [simplox_multirequest_server]},
 
-    {ok, {SupFlags, [AChild]}}.
+    ClientSup = {http_client_sup, 
+		 {http_client_sup, start_link, []}, 
+		 permanent, 1000, supervisor, 
+		 [http_client_sup]},
+
+    {ok, {SupFlags, [MultiRequestChild, ClientSup]}}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+find_children(SupPid, Name) ->
+    [Pid || {N, Pid, _, _} <- supervisor:which_children(SupPid),
+    N == Name].
+
+first([]) ->
+    {error, not_found};
+first([H|_]) ->
+    {ok, H}.
