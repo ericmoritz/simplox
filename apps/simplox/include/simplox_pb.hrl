@@ -24,3 +24,13 @@
 }).
 -endif.
 
+-ifndef(RESPONSE_PB_H).
+-define(RESPONSE_PB_H, true).
+-record(response, {
+    status = erlang:error({required, status}),
+    url = erlang:error({required, url}),
+    headers = [],
+    body
+}).
+-endif.
+
