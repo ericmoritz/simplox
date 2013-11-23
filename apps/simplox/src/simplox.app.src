@@ -10,14 +10,14 @@
 		  apptools,
 		  fn,
 		  cowboy,
-		  ibrowse,
+		  inets,
 		  protobuffs,
 		  folsom
                  ]},
   {mod, { simplox_app, []}},
   {env, [
 	 {http, [{ip, {127,0,0,1}}, {port, 8000}]},
-	 {acceptors, 10}
+	 {acceptors, 100}
 	]}
   ]}.
 	 
