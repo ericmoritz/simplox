@@ -73,7 +73,7 @@ set_resp_content_type(#state{media_type={X = <<"application">>,
 set_resp_content_type(#state{boundary=Boundary}, Req) ->
     cowboy_req:set_resp_header(
       <<"content-type">>,
-      <<"multipart/mixed; boundary=", Boundary>>).
+      <<"multipart/mixed; boundary=", Boundary>>, Req).
 
 
 decode_multirequest(Body) ->
@@ -203,11 +203,14 @@ encode_response({Status, Headers, Body},
 	  url=RequestMessage#request.url, 
 	  status=Status, 
 	  headers=[#header{key=N, value=V} || {N,V} <- Headers],
-	  body=Body
+	  body=Body,
+	  key=RequestMessage#request.key
 	 }]);
 encode_response({Status, Headers, Body}, RequestMessage, State) ->
     Headers2 = [{<<"X-Status">>, Status}, 
 		{<<"Content-Location">>, RequestMessage#request.url}]
+	++ [{<<"X-Simplox-Key">>, RequestMessage#request.key} ||
+	       RequestMessage#request.key =/= undefined]
 	++ Headers,
     [
      ?CRLF, <<"--">>, State#state.boundary, ?CRLF,
