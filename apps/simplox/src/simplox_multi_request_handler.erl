@@ -183,11 +183,7 @@ send_response(Pid, {Status, Headers, Body}, Props, F, State) ->
 					       Pid, 
 					       State#state.procs
 					      ),
-    RequestTime = proplists:get_value(time, Props, 0),
-    Headers2 = [{<<"X-Request-Time">>, [integer_to_list(RequestTime), " us"]}
-		|Headers],
-
-    F(encode_response({Status, Headers2, Body}, RequestMessage, State)),
+    F(encode_response({Status, Headers, Body}, RequestMessage, Props, State)),
     record_request_time(Pid, Props, State),
     after_response(Pid, State).
 
@@ -195,8 +191,10 @@ send_response(Pid, {Status, Headers, Body}, Props, F, State) ->
 %% This will change based on the media type
 encode_response({Status, Headers, Body}, 
 		RequestMessage, 
+		Props,
 		#state{media_type={<<"application">>,
 				   <<"protobuf+delimited+vnd.simplox.response">>,[]}}) ->
+    RequestTime = proplists:get_value(time, Props, 0),
     simplox_pb:encode(
       [
        #response{
@@ -204,10 +202,13 @@ encode_response({Status, Headers, Body},
 	  status=Status, 
 	  headers=[#header{key=N, value=V} || {N,V} <- Headers],
 	  body=Body,
-	  key=RequestMessage#request.key
+	  key=RequestMessage#request.key,
+	  request_time=RequestTime
 	 }]);
-encode_response({Status, Headers, Body}, RequestMessage, State) ->
+encode_response({Status, Headers, Body}, Props, RequestMessage, State) ->
+    RequestTime = proplists:get_value(time, Props, 0),
     Headers2 = [{<<"X-Status">>, Status}, 
+		{<<"X-Request-Time">>, [integer_to_list(RequestTime), " us"]},
 		{<<"Content-Location">>, RequestMessage#request.url}]
 	++ [{<<"X-Simplox-Key">>, RequestMessage#request.key} ||
 	       RequestMessage#request.key =/= undefined]

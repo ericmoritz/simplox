@@ -32,7 +32,9 @@
     url = erlang:error({required, url}),
     headers = [],
     body,
-    key
+    key,
+    request_time,
+    method
 }).
 -endif.
 

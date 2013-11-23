@@ -32,4 +32,6 @@ message Response {
   repeated Header headers = 3;
   optional bytes body = 4;
   optional bytes key = 5;
+  optional uint32 request_time = 6;
+  optional bytes method = 7;
 }
