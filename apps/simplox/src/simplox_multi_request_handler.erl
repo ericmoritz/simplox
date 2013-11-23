@@ -73,7 +73,7 @@ set_resp_content_type(#state{media_type={X = <<"application">>,
 set_resp_content_type(#state{boundary=Boundary}, Req) ->
     cowboy_req:set_resp_header(
       <<"content-type">>,
-      <<"multipart/mixed; boundary=", Boundary>>, Req).
+      [<<"multipart/mixed; boundary=">>, Boundary], Req).
 
 
 decode_multirequest(Body) ->
