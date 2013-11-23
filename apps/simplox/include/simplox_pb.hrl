@@ -12,7 +12,8 @@
     method = "get",
     headers = [],
     content_type,
-    body
+    body,
+    key
 }).
 -endif.
 
@@ -30,7 +31,8 @@
     status = erlang:error({required, status}),
     url = erlang:error({required, url}),
     headers = [],
-    body
+    body,
+    key
 }).
 -endif.
 
