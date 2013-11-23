@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_child/2]).
+-export([start_link/0, start_child/3]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -30,8 +30,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
-
+    supervisor:start_link(?MODULE, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -40,8 +39,8 @@ start_link() ->
 %% @spec start_child(TargetPid, RequestMessage) -> {ok, Pid} | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_child(TargetPid, RequestMessage) ->
-    supervisor:start_child(?SERVER, [TargetPid, RequestMessage]).
+start_child(SupPid, TargetPid, RequestMessage) ->
+    supervisor:start_child(SupPid, [TargetPid, RequestMessage]).
 
 
 %%%===================================================================
