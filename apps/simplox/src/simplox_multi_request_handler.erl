@@ -9,8 +9,8 @@
 %%% I may need to do some funky stuff to stream out the result in the accept callback.
 
 -module(simplox_multi_request_handler).
-
--record(state, {boundary, multirequest, procs=dict:new(), media_type}).
+-compile([{parse_transform, lager_transform}]).
+-record(state, {boundary, multirequest, procs=dict:new(), media_type, start=os:timestamp()}).
 -record(proc_item, {request_msg, start}).
 
 -define(CRLF, <<"\r\n">>).
@@ -44,7 +44,7 @@ content_types_accepted(Req, State) ->
     ], Req, State}.
 
 
-multirequest_parser(Req, State=#state{boundary=Boundary}) ->
+multirequest_parser(Req, State) ->
     {MediaType, Req1} = cowboy_req:meta(media_type, Req),
     {ok, Body, Req2} = cowboy_req:body(Req1),
     State1 = State#state{media_type=MediaType},
@@ -58,12 +58,23 @@ multirequest_parser(Req, State=#state{boundary=Boundary}) ->
 	{ok, MultiRequest} -> 
 	    State2 = spawn_request_procs(MultiRequest, State1),
             {{stream, StreamFun}, Req3, State3} = streaming_multipart_response(Req2, State2),
-            Req4 = cowboy_req:set_resp_header(
-	       <<"content-type">>,
-	       <<"multipart/mixed; boundary=", Boundary/binary>>,
-	       cowboy_req:set_resp_body_fun(chunked, StreamFun, Req3)),
-               {true, Req4, State3}
+            Req4 = set_resp_content_type(
+		     State3,
+		     cowboy_req:set_resp_body_fun(chunked, StreamFun, Req3)),
+	    {true, Req4, State3}
     end.
+
+set_resp_content_type(#state{media_type={X = <<"application">>,
+					 Y = <<"protobuf+delimited+vnd.simplox.response">>,[]}}, Req) ->
+    cowboy_req:set_resp_header(
+      <<"content-type">>,
+      iolist_to_binary([X, "/", Y]),
+      Req);
+set_resp_content_type(#state{boundary=Boundary}, Req) ->
+    cowboy_req:set_resp_header(
+      <<"content-type">>,
+      <<"multipart/mixed; boundary=", Boundary>>).
+
 
 decode_multirequest(Body) ->
     try     
@@ -101,14 +112,17 @@ content_types_provided(Req, State) ->
 	    Boundary = make_boundary(),
 	    State1 = State#state{boundary=Boundary},
 	    {[
-	      %% TODO: Make boundary work.
 	      {{<<"multipart">>, <<"mixed">>, '*'},
+	       '_'},
+	      {<<"application/protobuf+delimited+vnd.simplox.response">>,
 	       '_'}
 	     ], Req1, State1}
     end.
 
 
-rest_terminate(_Req, _State) ->
+rest_terminate(_Req, _) ->
+    %Stop = os:timestamp(),
+    %lager:info("~p", [timer:now_diff(Stop, Start) / 1000000]),
     ok.
 
 html_get_response(Req, State) ->
@@ -133,21 +147,19 @@ multipart_streamer(Req, State) ->
 stream_loop(Req, State, F) ->
     Result = receive 
 		 {http, Pid, {ok, {Status, Headers, Body}}, Props} ->
-		     record_request_time(Pid, Props, State),
 		     send_response(Pid, 
 				   {Status, Headers, Body}, 
 				   Props, 
 				   F, 
 				   State);
 		 {http, Pid, {error, Reason}, Props} ->
-		     record_request_time(Pid, Props, State),
 		     send_error(Pid, Reason, Props, F, State);
 		 {'DOWN', _Ref, process, _Pid, normal} ->
 		     {continue, State};
 		 {'DOWN', _Ref, process, Pid, Reason} ->
 		     error_logger:error_msg("Client crash: ~p~n", [Reason]),
 		     send_error(Pid, Reason, [], F, State)
-	     after 6000 ->
+	     after 10000 ->
 		     io:format("Timeout waiting for responses", []),
 		     {done, State}
  	     end,
@@ -172,20 +184,34 @@ send_response(Pid, {Status, Headers, Body}, Props, F, State) ->
 					       State#state.procs
 					      ),
     RequestTime = proplists:get_value(time, Props, 0),
-    Headers2 = [{<<"X-Status">>, Status}, 
-		{<<"X-Request-Time">>, [integer_to_list(RequestTime), " us"]},
-		{<<"Content-Location">>, RequestMessage#request.url}]
-	++ Headers,
+    Headers2 = [{<<"X-Request-Time">>, [integer_to_list(RequestTime), " us"]}
+		|Headers],
 
-    F(encode_response({Status, Headers2, Body}, State)),
+    F(encode_response({Status, Headers2, Body}, RequestMessage, State)),
+    record_request_time(Pid, Props, State),
     after_response(Pid, State).
 
 
 %% This will change based on the media type
-encode_response({_Status, Headers, Body}, State) ->
+encode_response({Status, Headers, Body}, 
+		RequestMessage, 
+		#state{media_type={<<"application">>,
+				   <<"protobuf+delimited+vnd.simplox.response">>,[]}}) ->
+    simplox_pb:encode(
+      [
+       #response{
+	  url=RequestMessage#request.url, 
+	  status=Status, 
+	  headers=[#header{key=N, value=V} || {N,V} <- Headers],
+	  body=Body
+	 }]);
+encode_response({Status, Headers, Body}, RequestMessage, State) ->
+    Headers2 = [{<<"X-Status">>, Status}, 
+		{<<"Content-Location">>, RequestMessage#request.url}]
+	++ Headers,
     [
      ?CRLF, <<"--">>, State#state.boundary, ?CRLF,
-     lists:map(fun header/1, Headers),
+     lists:map(fun header/1, Headers2),
      ?CRLF, ?CRLF, 
      Body].
 

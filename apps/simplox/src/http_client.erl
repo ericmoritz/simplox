@@ -6,7 +6,7 @@
 %%% Created : 15 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
 -module(http_client).
 -behaviour(gen_server).
--define(CLIENT, ibrowse).
+-define(CLIENT, httpc).
 
 -include_lib("simplox/include/simplox_pb.hrl").
 
@@ -145,25 +145,32 @@ make_request(TargetPid, RequestMessage) ->
     {Time, Result} = timer:tc(fun() -> send_req(
 					 url(RequestMessage),
 					 headers(RequestMessage),
+					 content_type(RequestMessage),
 					 method(RequestMessage),
 					 body(RequestMessage))
 			      end),
     folsom_metrics:notify({multi_request_running, {dec, 1}}),    
     TargetPid ! {http, self(), Result, [{time, Time}]}.
 
-send_req(Url, Headers, Method, undefined) ->
-    send_req(Url, Headers, Method, []);
-send_req(Url, Headers, Method, Body) ->
-    reply(send_req(?CLIENT, Url, Headers, Method, Body)).
+send_req(Url, Headers, ContentType, Method, undefined) ->
+    send_req(Url, Headers, ContentType, Method, []);
+send_req(Url, Headers, ContentType, Method, Body) ->
+    reply(send_req(?CLIENT, Url, Headers, ContentType, Method, Body)).
 
-send_req(lhttpc, Url, Headers, Method, Body) ->
+send_req(lhttpc, Url, Headers, _ContentType, Method, Body) ->
     lhttpc:request(Url, Method, Headers, Body, infinity);    
-send_req(ibrowse, Url, Headers, Method, Body) ->
-    ibrowse:send_req(Url, Headers, Method, Body, [{response_format, binary}]).
-
+send_req(ibrowse, Url, Headers, _ContentType, Method, Body) ->
+    %ibrowse:send_req(Url, Headers, Method, Body, []);
+    ibrowse:send_req(Url, Headers, Method, Body, []);
+send_req(httpc, Url, Headers, undefined, Method, _Body) ->
+    httpc:request(Method, {Url, Headers}, [], []);
+send_req(httpc, Url, Headers, ContentType, Method, Body) ->
+    httpc:request(Method, {Url, Headers, ContentType, Body}, [], []).
 
 
 %%% Normalize the reply for the various http clients
+reply({ok, {{_Vsn, StatusCode, _ReasonPhrase}, Headers, Body}}) -> % httpc
+    {ok, {integer_to_list(StatusCode), Headers, Body}};
 reply({ok, {{StatusCode, _ReasonPhrase}, Headers, Body}}) -> % lhttpc
     {ok, {integer_to_list(StatusCode), Headers, Body}};
 reply({ok, StatusCode, Headers, Body}) -> % ibrowse
@@ -182,7 +189,10 @@ url(RequestMessage) ->
 body(RequestMessage) ->
     RequestMessage#request.body.
 
-method(#request{method=Method}) ->
+method(R=#request{method=Method}) when is_binary(Method)->
+    method(R#request{method=binary_to_list(Method)});
+method(#request{method=Method}) when is_list(Method)->
     list_to_atom(Method).
 
-
+content_type(#request{content_type=CT}) ->
+    CT.

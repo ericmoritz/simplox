@@ -24,3 +24,10 @@ message Header {
   required bytes key = 1;
   optional bytes value = 2;
 }
+
+message Response {
+  required bytes status = 1;
+  required bytes url = 2;
+  repeated Header headers = 3;
+  optional bytes body = 4;
+}
