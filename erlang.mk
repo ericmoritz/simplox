@@ -13,6 +13,8 @@ all: compile
 
 compile: deps
 	$(REBAR) compile
+	mkdir -p apps/simplox/priv/www/static/proto
+	cp apps/simplox/src/*.proto apps/simplox/priv/www/static/proto/
 
 deps:
 	$(REBAR) get-deps

@@ -11,10 +11,15 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/0, fetch/2, responses/2]).
+-export([start_link/0, fetch/2, fetch_async/2, responses/2]).
 
 %% gen_fsm callbacks
--export([init/1, waiting/3,  started/3, handle_event/3,
+-export([init/1, 
+	 waiting/2,
+	 started/2,
+	 waiting/3,  
+	 started/3, 
+	 handle_event/3,
 	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -define(SERVER, ?MODULE).
@@ -22,6 +27,8 @@
 -record(state, {multirequest, 
 		procs=dict:new(), 
 		start=os:timestamp(),
+		async_pid, % The target PID for async responses
+		sup_pid,
 		client_sup_pid,
 		responses=[],
 		waiting=[]
@@ -56,7 +63,22 @@ fetch(SupPid, MultiRequest) ->
     {ok, Pid} = simplox_multirequest_sup:multirequest_pid(SupPid),
     {ok, ClientSupPid} = simplox_multirequest_sup:client_sup_pid(SupPid),
     gen_fsm:sync_send_event(Pid, 
-			    {fetch, ClientSupPid, MultiRequest}).
+			    {fetch, self(), SupPid, ClientSupPid, MultiRequest}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts a new multirequest
+%%
+%% @spec fetch(pid(), #multirequest{}) -> 
+%%     {ok, started} | {error, started}
+%% @end
+%%--------------------------------------------------------------------
+fetch_async(SupPid, MultiRequest) ->
+    {ok, Pid} = simplox_multirequest_sup:multirequest_pid(SupPid),
+    {ok, ClientSupPid} = simplox_multirequest_sup:client_sup_pid(SupPid),
+    gen_fsm:send_event(Pid, 
+		       {fetch, self(), SupPid, ClientSupPid, MultiRequest}).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,6 +113,15 @@ init([]) ->
     Timeout = 10000,
     {ok, waiting, #state{}, Timeout}.
 
+waiting({fetch, TargetPid, SupPid, ClientSupPid, MultiRequest}, State) ->
+    State2 = spawn_request_procs(ClientSupPid, MultiRequest, State),
+    {next_state, started, State2#state{sup_pid=SupPid, client_sup_pid=ClientSupPid, async_pid=TargetPid}}.
+
+started(_, State) ->
+    % If we've already started, ignore attempts at async events.
+    % we can't tell them to stop it...
+    {next_state, started, State}.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -109,10 +140,12 @@ init([]) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-waiting({fetch, ClientSupPid, MultiRequest}, _From, State) ->
+
+waiting({fetch, _TargetPid, SupPid, ClientSupPid, MultiRequest}, 
+	_From, State) ->
     State2 = spawn_request_procs(ClientSupPid, MultiRequest, State),
     Reply = {ok, started},
-    {reply, Reply, started, State2#state{client_sup_pid=ClientSupPid}};
+    {reply, Reply, started, State2#state{sup_pid=SupPid, client_sup_pid=ClientSupPid}};
 waiting(responses, _From, State) ->
     {reply, {error, not_started}, waiting, State}.
 
@@ -195,7 +228,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%--------------------------------------------------------------------
 handle_info({http, Pid, Result, Props}, 
 	    started, 
-	    State=#state{waiting=[], responses=Resp}) ->
+	    State=#state{waiting=[], responses=Resp, async_pid=undefined}) ->
     % if no one is waiting for a response, push the response onto the 
     % stack
     Resp2 = [mk_response(Pid, Result, Props, State)|Resp],
@@ -203,7 +236,7 @@ handle_info({http, Pid, Result, Props},
     {next_state, started, State2#state{responses=Resp2}};
 handle_info({http, Pid, Result, Props}, 
 	    started,
-	   State=#state{waiting=Waiting, responses=Resp}) ->
+	    State=#state{waiting=Waiting, responses=Resp, async_pid=undefined}) ->
     % if someone is wating, push the resp onto the stack,
     % update the state and reply to them
     {Reply, State2} = responses_reply(
@@ -214,14 +247,27 @@ handle_info({http, Pid, Result, Props},
     [gen_fsm:reply(From, Reply) || From <- Waiting],
     % continue
     {next_state, started, State3#state{waiting=[]}};
+handle_info({http, Pid, Result, Props}, 
+	    started, State=#state{async_pid=AsyncPid}) ->
+    % if no one is waiting for a response, push the response onto the 
+    % stack
+    {Reply, State2} = responses_reply(
+			[mk_response(Pid, Result, Props, State)],
+			State),
+    State3 = after_response(Pid, State2),
+
+    AsyncPid ! {?MODULE, State3#state.sup_pid, Reply},
+    {next_state, started, State3};
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, _, State) ->
     % make sure the proc is removed
     State2 = after_response(Pid, State),
     {next_state, started, State2};
 handle_info(timeout, _, State) ->
     io:format("Timeout waiting for responses", []),
-    {stop, timeout, State}.
-		     
+    {stop, timeout, State};
+handle_info(Msg, started, State) ->
+    io:format("Unknown msg: ~p~p", [Msg, State]),
+    {next_state, started}.
 
 
 %%--------------------------------------------------------------------
@@ -277,7 +323,7 @@ responses_reply(Responses, State=#state{procs=Procs}) ->
 	    end,
     {Reply, State2}.
 
-mk_response(Pid, {ok, {Status, Headers, Body}}, Props, State) ->
+mk_response(Pid, {ok, {Status, Headers, Body}}, Props, State=#state{multirequest=MR}) ->
     #proc_item{request_msg=RequestMessage} = dict:fetch(
 					       Pid, 
 					       State#state.procs
@@ -289,7 +335,8 @@ mk_response(Pid, {ok, {Status, Headers, Body}}, Props, State) ->
        headers=[#header{key=N, value=V} || {N,V} <- Headers],
        body=Body,
        key=RequestMessage#request.key,
-       request_time=RequestTime
+       request_time=RequestTime,
+       batch_key=MR#multirequest.batch_key
       }.
 
 after_response(Pid, State) ->

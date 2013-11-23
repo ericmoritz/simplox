@@ -48,7 +48,7 @@ multirequest_parser(Req, State) ->
     {MediaType, Req1} = cowboy_req:meta(media_type, Req),
     {ok, Body, Req2} = cowboy_req:body(Req1),
     State1 = State#state{media_type=MediaType},
-    case decode_multirequest(Body) of 
+    case simplox_pb_utils:decode_multirequest(Body) of 
 	{error, Reason} ->
 	    Req3 = cowboy_req:set_resp_header(
 		     <<"content-type">>,
@@ -74,20 +74,6 @@ set_resp_content_type(#state{boundary=Boundary}, Req) ->
     cowboy_req:set_resp_header(
       <<"content-type">>,
       [<<"multipart/mixed; boundary=">>, Boundary], Req).
-
-
-decode_multirequest(Body) ->
-    try     
-	case simplox_pb:decode_multirequest(Body) of
-	    #multirequest{requests=[]} ->
-		{error, "MultiRequest.requests required"};
-	    Msg ->
-		{ok, Msg}
-	end
-    catch Error ->
-	    ErrorStr = io_lib:format("Error decoding body: ~p", [Error]),
-	    {error, ErrorStr}
-    end.
 
 
 spawn_request_procs(MultiRequest, State) ->

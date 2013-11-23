@@ -29,7 +29,15 @@ init([Conf]) ->
 		 [
 		  {'_', [
 			 {"/simplox/v1/dummy/", simplox_dummy_handler, []},
-			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []}
+			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []},
+			 {"/simplox/v1/multirequest/", simplox_multi_request_handler, []},
+			 {"/simplox/v1/multirequest.ws", simplox_multirequest_websocket, []},
+			 {"/simplox/", cowboy_static, {priv_file, simplox, "www/index.html"}},
+			 {"/simplox/static/proto/[...]", cowboy_static, 
+			  {priv_dir, simplox, "www/static/proto", [{mimetypes, {<<"text">>, <<"plain">>, []}}]}
+			 },
+
+			 {"/simplox/[...]", cowboy_static, {priv_dir, simplox, "www"}}
 			]}
 		 ]),
     ClientSup = {http_client_sup, 

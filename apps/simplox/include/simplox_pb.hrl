@@ -1,7 +1,8 @@
 -ifndef(MULTIREQUEST_PB_H).
 -define(MULTIREQUEST_PB_H, true).
 -record(multirequest, {
-    requests = []
+    requests = [],
+    batch_key
 }).
 -endif.
 
@@ -34,7 +35,8 @@
     body,
     key,
     request_time,
-    method
+    method,
+    batch_key
 }).
 -endif.
 
