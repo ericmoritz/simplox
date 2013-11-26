@@ -156,7 +156,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 start_timers() ->
     % start all the existing timers
-    ets:foldl(fun({Key, ValueMFA, Timeout, Ref}, Acc) ->
+    ets:foldl(fun({Key, ValueMFA, Timeout, _}, Acc) ->
 		      start_timer(Key, ValueMFA, Timeout),
 		      Acc
 	      end,
