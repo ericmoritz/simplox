@@ -12,7 +12,8 @@
 		  cowboy,
 		  inets,
 		  protobuffs,
-		  folsom
+		  folsom,
+		  smartcache
                  ]},
   {mod, { simplox_app, []}},
   {env, [

@@ -1,25 +1,26 @@
-%%% @author Eric Moritz <emoritz@gannett.com>
+%%%-------------------------------------------------------------------
+%%% @author Eric Moritz <eric@eric-dev-vm>
 %%% @copyright (C) 2013, Eric Moritz
 %%% @doc
-%%% An async http client for the multirequests
+%%% This gen_server handles talking to the cache service and talking to the 
+%%% worker manager if values are inaccessible
 %%% @end
-%%% Created : 15 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
--module(http_client).
+%%% Created : 25 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
+%%%-------------------------------------------------------------------
+-module(smartcache_client_server).
+
 -behaviour(gen_server).
--define(CLIENT, httpc).
-
--include_lib("simplox/include/simplox_pb.hrl").
-
+-include("smartcache.hrl").
 %% API
--export([start_link/2, start/2, send_req/5]).
+-export([start_link/1, get/4, refresh/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE).
+-define(SERVER, ?MODULE). 
 
--record(state, {target, msg}).
+-record(state, {backend_mod}).
 
 %%%===================================================================
 %%% API
@@ -32,20 +33,31 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(TargetPid, RequestMessage) ->
-    gen_server:start_link(?MODULE, [TargetPid, RequestMessage], []).
+start_link(BackendMod) ->
+    gen_server:start_link(?MODULE, [BackendMod], []).
 
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
+%% Requests the value from the cache
+%% 
+%% @spec
 %% @end
 %%--------------------------------------------------------------------
-start(TargetPid, RequestMessage) ->
-    gen_server:start(?MODULE, [TargetPid, RequestMessage], []).
 
+get(Pid, Key, ValueGenMFA, Timeout) ->
+    gen_server:call(Pid, {get, Key, ValueGenMFA, Timeout}).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Tells the cache to refresh the value; casted by the manager
+%% @spec
+%% @end
+%%--------------------------------------------------------------------
+-spec refresh(pid(), iodata(), mfa(), seconds()) -> ok | {error, any()}.
+refresh(Pid, Key, ValueGenMFA, Timeout) ->
+    gen_server:cast(Pid, {refresh, Key, ValueGenMFA, Timeout}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,8 +74,8 @@ start(TargetPid, RequestMessage) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([TargetPid, RequestMessage]) ->
-    {ok, #state{target=TargetPid, msg=RequestMessage}, 0}.
+init([BackendMod]) ->
+    {ok, #state{backend_mod=BackendMod}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -79,9 +91,16 @@ init([TargetPid, RequestMessage]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call({get, Key, ValueMFA, Timeout}, _From, State) ->
+    % notify the prefetch manager of the existance of this key
+    smartcache_prefetch_manager:notify(Key, ValueMFA, Timeout),
+    Result = get_or_set(Key, ValueMFA, Timeout, State),
+    {reply, Result, State};
+handle_call(Msg, _From, State) ->
+    lager:error("Unknown MSG: ~p", [Msg]),
+    {reply, {error, who_is_this_stop_calling_me}, State}.
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -93,7 +112,12 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
+handle_cast({refresh, Key, ValueGenMFA, Timeout}, State) ->
+    update_if_not_found({error, not_found}, Key, ValueGenMFA, Timeout, State),
+    % run the valuefun and store the result,
+    {noreply, State};
+handle_cast(Msg, State) ->
+    lager:error("Unknown MSG: ~p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -106,9 +130,6 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(timeout, State=#state{target=TargetPid, msg=RequestMsg}) ->
-    make_request(TargetPid, RequestMsg),
-    {stop, normal, State}; 
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -140,70 +161,26 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-make_request(TargetPid, RequestMessage) ->
-    folsom_metrics:notify({multi_request_running, {inc, 1}}),    
-    {Time, Result} = timer:tc(fun() -> send_req_cached(RequestMessage) end),
-    folsom_metrics:notify({multi_request_running, {dec, 1}}),    
-    TargetPid ! {http, self(), Result, [{time, Time}]}.
+-spec get_or_set(key(), mfa(), seconds(), #state{}) -> {ok, iodata()} | {error, any()}.
+get_or_set(Key, MFA, Timeout, State=#state{backend_mod=Mod}) ->
+    update_if_not_found(Mod:get(Key), Key, MFA, Timeout, State).
 
-send_req_cached(RequestMessage=#request{cache=undefined}) ->
-    send_req(
-      url(RequestMessage),
-      headers(RequestMessage),
-      content_type(RequestMessage),
-      method(RequestMessage),
-      body(RequestMessage));
-send_req_cached(RequestMessage=#request{cache=Cache}) ->
-    Args = [url(RequestMessage),
-      headers(RequestMessage),
-      content_type(RequestMessage),
-      method(RequestMessage),
-      body(RequestMessage)],
-    smartcache_client:get(Cache#cache.key,
-		   {http_client, send_req, Args},
-		   Cache#cache.timeout).
-
-send_req(Url, Headers, ContentType, Method, undefined) ->
-    send_req(Url, Headers, ContentType, Method, []);
-send_req(Url, Headers, ContentType, Method, Body) ->
-    reply(send_req(?CLIENT, Url, Headers, ContentType, Method, Body)).
-
-send_req(lhttpc, Url, Headers, _ContentType, Method, Body) ->
-    lhttpc:request(Url, Method, Headers, Body, infinity);    
-send_req(ibrowse, Url, Headers, _ContentType, Method, Body) ->
-    %ibrowse:send_req(Url, Headers, Method, Body, []);
-    ibrowse:send_req(Url, Headers, Method, Body, []);
-send_req(httpc, Url, Headers, undefined, Method, _Body) ->
-    httpc:request(Method, {Url, Headers}, [], []);
-send_req(httpc, Url, Headers, ContentType, Method, Body) ->
-    httpc:request(Method, {Url, Headers, ContentType, Body}, [], []).
-
-
-%%% Normalize the reply for the various http clients
-reply({ok, {{_Vsn, StatusCode, _ReasonPhrase}, Headers, Body}}) -> % httpc
-    {ok, {integer_to_list(StatusCode), Headers, Body}};
-reply({ok, {{StatusCode, _ReasonPhrase}, Headers, Body}}) -> % lhttpc
-    {ok, {integer_to_list(StatusCode), Headers, Body}};
-reply({ok, StatusCode, Headers, Body}) -> % ibrowse
-    {ok, {StatusCode, Headers, Body}};
-reply(E={error, _}) ->
+-spec update_if_not_found({ok, key()} | {error, not_found}, 
+      key(), mfa(), seconds(), #state{}) -> {ok, value()}.
+update_if_not_found({ok, Value}, _, _, _, _) ->
+    {ok, Value}; % pass through
+update_if_not_found({error, not_found}, Key, {M,F,A}, Timeout, 
+		    #state{backend_mod=Mod}) ->
+    lager:info("Cache Miss: ~p", [{Key, {M,F,A}, Timeout}]),
+    case erlang:apply(M,F,A) of 
+	E={error,_} ->
+	    % Don't store an error
+	    E;
+	{ok, Value} ->
+	    Mod:set(Key, Value, Timeout),
+	    {ok, Value}
+    end;
+% pass through any unknown errors
+update_if_not_found(E={error, _}, _, _, _, _) ->
     E.
 
-
-headers(RequestMessage=#request{content_type=CT}) ->
-    [{<<"content-type">>, CT} || CT =/= undefined] ++ 
-	[{Header#header.key, Header#header.value} || Header <- RequestMessage#request.headers].
-
-url(RequestMessage) ->
-    binary_to_list(RequestMessage#request.url).
-
-body(RequestMessage) ->
-    RequestMessage#request.body.
-
-method(R=#request{method=Method}) when is_binary(Method)->
-    method(R#request{method=binary_to_list(Method)});
-method(#request{method=Method}) when is_list(Method)->
-    list_to_atom(Method).
-
-content_type(#request{content_type=CT}) ->
-    CT.

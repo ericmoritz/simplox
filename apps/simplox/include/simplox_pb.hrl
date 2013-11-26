@@ -13,7 +13,16 @@
     headers = [],
     content_type,
     body,
-    key
+    key,
+    cache
+}).
+-endif.
+
+-ifndef(CACHE_PB_H).
+-define(CACHE_PB_H, true).
+-record(cache, {
+    key = erlang:error({required, key}),
+    timeout = erlang:error({required, timeout})
 }).
 -endif.
 

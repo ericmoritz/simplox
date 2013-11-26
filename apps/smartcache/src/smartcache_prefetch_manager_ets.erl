@@ -1,25 +1,26 @@
-%%% @author Eric Moritz <emoritz@gannett.com>
+%%%-------------------------------------------------------------------
+%%% @author Eric Moritz <eric@eric-dev-vm>
 %%% @copyright (C) 2013, Eric Moritz
 %%% @doc
-%%% An async http client for the multirequests
+%%% This owner of the public ETS table that the manager uses for
+%%% registering timeouts
 %%% @end
-%%% Created : 15 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
--module(http_client).
--behaviour(gen_server).
--define(CLIENT, httpc).
+%%% Created : 25 Nov 2013 by Eric Moritz <eric@eric-dev-vm>
+%%%-------------------------------------------------------------------
+-module(smartcache_prefetch_manager_ets).
 
--include_lib("simplox/include/simplox_pb.hrl").
+-behaviour(gen_server).
+
+-include("smartcache.hrl").
 
 %% API
--export([start_link/2, start/2, send_req/5]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE).
-
--record(state, {target, msg}).
+-define(SERVER, ?MODULE). 
 
 %%%===================================================================
 %%% API
@@ -32,20 +33,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(TargetPid, RequestMessage) ->
-    gen_server:start_link(?MODULE, [TargetPid, RequestMessage], []).
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start(TargetPid, RequestMessage) ->
-    gen_server:start(?MODULE, [TargetPid, RequestMessage], []).
-
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,8 +51,9 @@ start(TargetPid, RequestMessage) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([TargetPid, RequestMessage]) ->
-    {ok, #state{target=TargetPid, msg=RequestMessage}, 0}.
+init([]) ->
+    ets:new(?MANAGER_KEY_TAB, [bag, public, named_table]),
+    {ok, no_state}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -106,9 +96,6 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(timeout, State=#state{target=TargetPid, msg=RequestMsg}) ->
-    make_request(TargetPid, RequestMsg),
-    {stop, normal, State}; 
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -140,70 +127,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-make_request(TargetPid, RequestMessage) ->
-    folsom_metrics:notify({multi_request_running, {inc, 1}}),    
-    {Time, Result} = timer:tc(fun() -> send_req_cached(RequestMessage) end),
-    folsom_metrics:notify({multi_request_running, {dec, 1}}),    
-    TargetPid ! {http, self(), Result, [{time, Time}]}.
-
-send_req_cached(RequestMessage=#request{cache=undefined}) ->
-    send_req(
-      url(RequestMessage),
-      headers(RequestMessage),
-      content_type(RequestMessage),
-      method(RequestMessage),
-      body(RequestMessage));
-send_req_cached(RequestMessage=#request{cache=Cache}) ->
-    Args = [url(RequestMessage),
-      headers(RequestMessage),
-      content_type(RequestMessage),
-      method(RequestMessage),
-      body(RequestMessage)],
-    smartcache_client:get(Cache#cache.key,
-		   {http_client, send_req, Args},
-		   Cache#cache.timeout).
-
-send_req(Url, Headers, ContentType, Method, undefined) ->
-    send_req(Url, Headers, ContentType, Method, []);
-send_req(Url, Headers, ContentType, Method, Body) ->
-    reply(send_req(?CLIENT, Url, Headers, ContentType, Method, Body)).
-
-send_req(lhttpc, Url, Headers, _ContentType, Method, Body) ->
-    lhttpc:request(Url, Method, Headers, Body, infinity);    
-send_req(ibrowse, Url, Headers, _ContentType, Method, Body) ->
-    %ibrowse:send_req(Url, Headers, Method, Body, []);
-    ibrowse:send_req(Url, Headers, Method, Body, []);
-send_req(httpc, Url, Headers, undefined, Method, _Body) ->
-    httpc:request(Method, {Url, Headers}, [], []);
-send_req(httpc, Url, Headers, ContentType, Method, Body) ->
-    httpc:request(Method, {Url, Headers, ContentType, Body}, [], []).
-
-
-%%% Normalize the reply for the various http clients
-reply({ok, {{_Vsn, StatusCode, _ReasonPhrase}, Headers, Body}}) -> % httpc
-    {ok, {integer_to_list(StatusCode), Headers, Body}};
-reply({ok, {{StatusCode, _ReasonPhrase}, Headers, Body}}) -> % lhttpc
-    {ok, {integer_to_list(StatusCode), Headers, Body}};
-reply({ok, StatusCode, Headers, Body}) -> % ibrowse
-    {ok, {StatusCode, Headers, Body}};
-reply(E={error, _}) ->
-    E.
-
-
-headers(RequestMessage=#request{content_type=CT}) ->
-    [{<<"content-type">>, CT} || CT =/= undefined] ++ 
-	[{Header#header.key, Header#header.value} || Header <- RequestMessage#request.headers].
-
-url(RequestMessage) ->
-    binary_to_list(RequestMessage#request.url).
-
-body(RequestMessage) ->
-    RequestMessage#request.body.
-
-method(R=#request{method=Method}) when is_binary(Method)->
-    method(R#request{method=binary_to_list(Method)});
-method(#request{method=Method}) when is_list(Method)->
-    list_to_atom(Method).
-
-content_type(#request{content_type=CT}) ->
-    CT.

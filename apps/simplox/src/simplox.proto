@@ -19,6 +19,12 @@ message Request {
   optional bytes content_type = 4;
   optional bytes body = 5;
   optional bytes key = 6;
+  optional Cache cache = 7;
+}
+
+message Cache {
+  required bytes key = 1;
+  required uint32 timeout = 2;
 }
 
 message Header {
