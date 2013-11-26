@@ -20,7 +20,7 @@
 
 -define(SERVER, ?MODULE). 
 
--record(state, {backend_handle, backend_mod}).
+-record(state, {backend_mod}).
 
 %%%===================================================================
 %%% API
@@ -33,8 +33,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(BackendMFA) ->
-    gen_server:start_link(?MODULE, [BackendMFA], []).
+start_link(BackendMod) ->
+    gen_server:start_link(?MODULE, [BackendMod], []).
 
 
 %%--------------------------------------------------------------------
@@ -74,10 +74,8 @@ refresh(Pid, Key, ValueGenMFA, Timeout) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([{M,F,A}]) ->
-    %%% start the backend
-    {ok, Handle} = erlang:apply(M, F, A),
-    {ok, #state{backend_handle=Handle, backend_mod=M}}.
+init([BackendMod]) ->
+    {ok, #state{backend_mod=BackendMod}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -93,17 +91,11 @@ init([{M,F,A}]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({get, Key, ValueMFA, Timeout}, From, State) ->
+handle_call({get, Key, ValueMFA, Timeout}, _From, State) ->
     % notify the prefetch manager of the existance of this key
     smartcache_prefetch_manager:notify(Key, ValueMFA, Timeout),
-    % fetch data from cache, if the data is missing,
-    Result = case (State#state.backend_mod):get(State#state.backend_handle, Key) of
-		 {error, not_found} ->
-		     get_or_set(Key, ValueMFA, Timeout, State);
-		 {ok, Value} ->
-		     Value
-	     end,
-    {reply, {ok, Result}, State};
+    Result = get_or_set(Key, ValueMFA, Timeout, State),
+    {reply, Result, State};
 handle_call(Msg, _From, State) ->
     lager:error("Unknown MSG: ~p", [Msg]),
     {reply, {error, who_is_this_stop_calling_me}, State}.
@@ -170,19 +162,24 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 -spec get_or_set(key(), mfa(), seconds(), #state{}) -> {ok, iodata()} | {error, any()}.
-get_or_set(Key, MFA, Timeout, State=#state{backend_mod=Mod, backend_handle=Pid}) ->
-    update_if_not_found(Mod:get(Pid, Key), Key, MFA, Timeout, State).
+get_or_set(Key, MFA, Timeout, State=#state{backend_mod=Mod}) ->
+    update_if_not_found(Mod:get(Key), Key, MFA, Timeout, State).
 
 -spec update_if_not_found({ok, key()} | {error, not_found}, 
       key(), mfa(), seconds(), #state{}) -> {ok, value()}.
 update_if_not_found({ok, Value}, _, _, _, _) ->
     {ok, Value}; % pass through
 update_if_not_found({error, not_found}, Key, {M,F,A}, Timeout, 
-		    #state{backend_mod=Mod, backend_handle=Pid}) ->
+		    #state{backend_mod=Mod}) ->
     lager:info("Cache Miss: ~p", [{Key, {M,F,A}, Timeout}]),
-    Value = erlang:apply(M,F,A),
-    Mod:set(Pid, Key, Value, Timeout),
-    {ok, Value};
+    case erlang:apply(M,F,A) of 
+	E={error,_} ->
+	    % Don't store an error
+	    E;
+	{ok, Value} ->
+	    Mod:set(Key, Value, Timeout),
+	    {ok, Value}
+    end;
 % pass through any unknown errors
 update_if_not_found(E={error, _}, _, _, _, _) ->
     E.

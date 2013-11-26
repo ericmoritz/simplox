@@ -24,16 +24,20 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    % TODO: Make configurable
-    CacheMFA = {smartcache_dets_backend, open, ["/tmp/smartcache.dets"]},
+    
+    % TODO: Make Backend configurable
+    BackendSup = {smartcache_dets_backend_sup,
+		  {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
+		  permanent, 2000, supervisor, [smartcache_dets_backend_sup]},
+    BackendMod = smartcache_dets_backend,
 
     ManagerSup = {smartcache_prefetch_manager_sup, 
 		  {smartcache_prefetch_manager_sup, start_link, []},
 		  permanent, 2000, supervisor, [smartcache_prefetch_manager_sup]},
 
     ClientSup = {smartcache_client_sup,
-		 {smartcache_client_sup, start_link, [CacheMFA]},
+		 {smartcache_client_sup, start_link, [BackendMod]},
 		 permanent, 2000, supervisor, [smartcache_client_sup]},
 
-    {ok, { {one_for_one, 1000, 3600}, [ManagerSup, ClientSup]} }.
+    {ok, { {one_for_one, 1000, 3600}, [BackendSup, ManagerSup, ClientSup]} }.
 

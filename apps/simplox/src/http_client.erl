@@ -11,7 +11,7 @@
 -include_lib("simplox/include/simplox_pb.hrl").
 
 %% API
--export([start_link/2, start/2]).
+-export([start_link/2, start/2, send_req/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -142,15 +142,26 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 make_request(TargetPid, RequestMessage) ->
     folsom_metrics:notify({multi_request_running, {inc, 1}}),    
-    {Time, Result} = timer:tc(fun() -> send_req(
-					 url(RequestMessage),
-					 headers(RequestMessage),
-					 content_type(RequestMessage),
-					 method(RequestMessage),
-					 body(RequestMessage))
-			      end),
+    {Time, Result} = timer:tc(fun() -> send_req_cached(RequestMessage) end),
     folsom_metrics:notify({multi_request_running, {dec, 1}}),    
     TargetPid ! {http, self(), Result, [{time, Time}]}.
+
+send_req_cached(RequestMessage=#request{cache=undefined}) ->
+    send_req(
+      url(RequestMessage),
+      headers(RequestMessage),
+      content_type(RequestMessage),
+      method(RequestMessage),
+      body(RequestMessage));
+send_req_cached(RequestMessage=#request{cache=Cache}) ->
+    Args = [url(RequestMessage),
+      headers(RequestMessage),
+      content_type(RequestMessage),
+      method(RequestMessage),
+      body(RequestMessage)],
+    smartcache_client:get(Cache#cache.key,
+		   {http_client, send_req, Args},
+		   Cache#cache.timeout).
 
 send_req(Url, Headers, ContentType, Method, undefined) ->
     send_req(Url, Headers, ContentType, Method, []);

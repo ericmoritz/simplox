@@ -7,7 +7,7 @@
 
 -module(smartcache_client).
 
--export([get/3, refresh/3]).
+-export([get/3, refresh/3, identity_value_gen/1, fun_value_gen/1]).
 -include("smartcache.hrl").
 
 %%--------------------------------------------------------------------
@@ -34,3 +34,10 @@ refresh(Key, ValueGenMFA, Timeout) ->
     lager:info("Refreshing: ~p", [{Key, ValueGenMFA, Timeout}]),
     {ok, Pid} = smartcache_client_sup:start_child(),
     smartcache_client_server:refresh(Pid, Key, ValueGenMFA, Timeout).
+
+
+identity_value_gen(Value) ->
+    Value.
+
+fun_value_gen(Fun) ->
+    Fun().
