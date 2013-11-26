@@ -1,0 +1,14 @@
+{application, smartcache,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  folsom,
+		  lager
+                 ]},
+  {mod, { smartcache_app, []}},
+  {env, []}
+ ]}.
