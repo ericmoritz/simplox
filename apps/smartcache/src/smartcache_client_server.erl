@@ -167,6 +167,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 -spec get_or_set(key(), mfa(), seconds(), #state{}) -> {ok, iodata()} | {error, any()}.
 get_or_set(Key, MFA, Timeout, State=#state{backend_mod=Mod}) ->
+    Result = Mod:get(Key),
+    case Result of
+	{error, not_found} ->
+	    lager:info("Cache Miss: ~p", [{Key, MFA, Timeout}]);
+	_ ->
+	    pass
+    end,
     update_if_not_found(Mod:get(Key), Key, MFA, Timeout, State).
 
 -spec update_if_not_found({ok, key()} | {error, not_found}, 
@@ -175,7 +182,6 @@ update_if_not_found({ok, Value}, _, _, _, _) ->
     {ok, Value}; % pass through
 update_if_not_found({error, not_found}, Key, {M,F,A}, Timeout, 
 		    #state{backend_mod=Mod}) ->
-    lager:info("Cache Miss: ~p", [{Key, {M,F,A}, Timeout}]),
     case erlang:apply(M,F,A) of 
 	E={error,_} ->
 	    % Don't store an error
