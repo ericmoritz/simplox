@@ -30,7 +30,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link(?MODULE, []).
 
 multirequest_pid(SupPid) ->
     first(find_children(SupPid, simplox_multirequest_server)).

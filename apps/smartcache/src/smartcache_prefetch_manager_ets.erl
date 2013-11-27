@@ -52,7 +52,7 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    ets:new(?MANAGER_KEY_TAB, [bag, public, named_table]),
+    ets:new(?MANAGER_KEY_TAB, [public, named_table]),
     {ok, no_state}.
 
 %%--------------------------------------------------------------------

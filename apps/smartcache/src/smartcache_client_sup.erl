@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/1, start_child/0]).
+-export([start_link/1, start_child/0, with_child/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -36,6 +36,13 @@ start_link(CacheMFA) ->
 
 start_child() ->
     supervisor:start_child(?SERVER, []).
+
+with_child(F) ->
+    {ok, Pid} = start_child(),
+    Ret = F(Pid),
+    smartcache_client_server:stop(Pid),
+    Ret.
+	    
 
 %%%===================================================================
 %%% Supervisor callbacks

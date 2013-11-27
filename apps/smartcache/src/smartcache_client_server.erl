@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 -include("smartcache.hrl").
 %% API
--export([start_link/1, get/4, refresh/4]).
+-export([start_link/1, stop/1, get/4, refresh/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -36,6 +36,8 @@
 start_link(BackendMod) ->
     gen_server:start_link(?MODULE, [BackendMod], []).
 
+stop(Pid) ->
+    gen_server:call(Pid, stop).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,6 +93,8 @@ init([BackendMod]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 handle_call({get, Key, ValueMFA, Timeout}, _From, State) ->
     % notify the prefetch manager of the existance of this key
     smartcache_prefetch_manager:notify(Key, ValueMFA, Timeout),
