@@ -7,7 +7,7 @@
 
 -module(simplox).
 
--export([start/0, stats/0]).
+-export([start/0, stats/0, trace/2]).
 
 
 start() ->
@@ -18,3 +18,7 @@ stats() ->
      {multi_request_running, folsom_metrics:get_metric_value(multi_request_running)},    
      {multi_request_overhead, folsom_metrics:get_histogram_statistics(multi_request_overhead)}].
      
+trace(Key, F) ->
+    {T, Ret} = timer:tc(F),
+    lager:info("~p: ~p ms", [Key, T / 1000]),
+    Ret.

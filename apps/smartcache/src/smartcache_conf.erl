@@ -7,32 +7,26 @@
 
 -module(smartcache_conf).
 
--export([init/0, acceptors/1, http_ranch_tcp/1]).
+-export([init/0, backend_mod/1, backend_child_spec/1]).
 
 -type proplist() :: list().
 -type config() :: proplist().
 
 -spec init() -> config().
 init() ->
-    application:get_all_env(simplox).
+    application:get_all_env(smartcache).
 
 
--spec acceptors(config()) -> integer().
-acceptors(Conf) ->
-    get_value(acceptors, Conf).
+-spec backend_mod(config()) -> atom().
+backend_mod(_Conf) ->
+    smartcache_ets_backend.
 
+-spec backend_child_spec(config()) -> supervisor:child_spec().
+backend_child_spec(_Conf) ->
+    {smartcache_ets_backend_sup,
+     {smartcache_ets_backend_sup, start_link, []},
+     permanent, 2000, supervisor, [smartcache_ets_backend_sup]}.
 
--spec http_ranch_tcp(config()) -> proplist().
-http_ranch_tcp(Conf) ->
-    %% Allow for $PORT env override, this is for Heroku mainly
-    case os:getenv("PORT") of
-	false ->
-	    get_value(http, Conf);
-	PortStr ->
-	    [{port, list_to_integer(PortStr)}]
-    end.
-
-
-get_value(Key, Conf) ->
-    proplists:get_value(Key, Conf).
+%get_value(Key, Conf) ->
+%    proplists:get_value(Key, Conf).
 

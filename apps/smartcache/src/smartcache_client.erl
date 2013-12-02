@@ -18,10 +18,7 @@
 %%--------------------------------------------------------------------
 -spec get(key(), mfa(), seconds()) -> {ok, value()} | {error, any()}.
 get(Key, ValueGenMFA, Timeout) ->
-    smartcache_client_sup:with_child(
-      fun(Pid) ->
-	      smartcache_client_server:get(Pid, Key, ValueGenMFA, Timeout)
-      end).
+    smartcache_client_server:get(Key, ValueGenMFA, Timeout).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -33,10 +30,7 @@ get(Key, ValueGenMFA, Timeout) ->
 -spec refresh(key(), mfa(), seconds()) -> ok.
 refresh(Key, ValueGenMFA, Timeout) ->
     lager:info("Refreshing: ~p", [{Key, ValueGenMFA, Timeout}]),
-    smartcache_client_sup:with_child(
-      fun(Pid) ->
-	      smartcache_client_server:refresh(Pid, Key, ValueGenMFA, Timeout)
-      end).
+    smartcache_client_server:refresh(Key, ValueGenMFA, Timeout).
 
 identity_value_gen(Value) ->
     Value.
