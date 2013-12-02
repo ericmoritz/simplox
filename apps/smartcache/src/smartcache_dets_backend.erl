@@ -12,7 +12,6 @@
 %% API
 -export([start_link/1, get/1, set/3]).
 -include("smartcache.hrl").
--type dets_name() :: any().
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,

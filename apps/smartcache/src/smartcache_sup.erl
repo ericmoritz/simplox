@@ -35,7 +35,7 @@ init([]) ->
     
     BackendMod = smartcache_conf:backend_mod(Conf),
     BackendSup = smartcache_conf:backend_child_spec(Conf),
-
+    lager:info("~p", [BackendSup]),
     ManagerSup = {smartcache_prefetch_manager_sup, 
 		  {smartcache_prefetch_manager_sup, start_link, []},
 		  permanent, 2000, supervisor, [smartcache_prefetch_manager_sup]},

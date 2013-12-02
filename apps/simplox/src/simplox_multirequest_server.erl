@@ -193,7 +193,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({http, Pid, {ok, {response_bin, ResponseBin}}}, 
+handle_info({http, Pid, {ok, ResponseBin}}, 
 	    started, 
 	    State=#state{waiting=[], responses=Responses}) ->
     % if no one is waiting for a response, push the response onto the 
@@ -201,7 +201,7 @@ handle_info({http, Pid, {ok, {response_bin, ResponseBin}}},
     Resp2 = [ResponseBin|Responses],
     State2 = after_response(Pid, State),
     {next_state, started, State2#state{responses=Resp2}};
-handle_info({http, Pid, {ok, {response_bin, ResponseBin}}}, 
+handle_info({http, Pid, {ok, ResponseBin}}, 
 	    started,
 	   State=#state{waiting=Waiting, responses=Responses}) ->
     % if someone is wating, push the resp onto the stack,
