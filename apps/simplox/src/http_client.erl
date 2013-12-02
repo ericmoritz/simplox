@@ -142,9 +142,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 make_request(TargetPid, RequestMessage) ->
     folsom_metrics:notify({multi_request_running, {inc, 1}}),    
-    Response = send_req_cached(RequestMessage),
+    Result = send_req_cached(RequestMessage),
     folsom_metrics:notify({multi_request_running, {dec, 1}}),    
-    TargetPid ! {http, self(), Response}.
+    TargetPid ! {http, self(), Result}.
 
 send_req_cached(RequestMessage=#request{cache=undefined}) ->
     send_req(
@@ -196,13 +196,13 @@ reply(E={error, _}) ->
     E.
 
 response(Key, Url, {RequestTime, {ok, {Status, Headers, Body}}}) ->
-    {ok, {response_bin, iolist_to_binary(simplox_pb:encode_response(#response{
+    {ok, iolist_to_binary(simplox_pb:encode_response(#response{
        key=Key,
        url=Url, 
        status=Status, 
        headers=[#header{key=N, value=V} || {N,V} <- Headers],
        body=Body,
-       request_time=RequestTime}))}}.
+       request_time=RequestTime}))}.
 
 headers(RequestMessage=#request{content_type=CT}) ->
     [{<<"content-type">>, CT} || CT =/= undefined] ++ 
