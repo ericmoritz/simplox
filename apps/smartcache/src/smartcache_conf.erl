@@ -6,7 +6,7 @@
 %%% Created : 20 Nov 2013 by Moritz <emoritz@GCI-EMORITZ-M.local>
 
 -module(smartcache_conf).
--define(BACKEND, ets).
+-define(BACKEND, mcd).
 
 -export([init/0, backend_mod/1, backend_child_spec/1]).
 
