@@ -60,9 +60,9 @@ fetch(SupPid, MultiRequest) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Returns a list of responses
+%% Returns a list of #response{} protobuf binaries
 %% @spec responses(pid(), Timeout :: integer() | infinity) -> 
-%%     {ok, {done | continue, [#response{}]}} | {error, not_started}
+%%     {ok, {done | continue, [binary()]}} | {error, not_started}
 %% @end
 %%--------------------------------------------------------------------
 responses(SupPid, Timeout) ->
@@ -193,21 +193,21 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({http, Pid, Result, Props}, 
+handle_info({http, Pid, {ok, {response_bin, ResponseBin}}}, 
 	    started, 
-	    State=#state{waiting=[], responses=Resp}) ->
+	    State=#state{waiting=[], responses=Responses}) ->
     % if no one is waiting for a response, push the response onto the 
     % stack
-    Resp2 = [mk_response(Pid, Result, Props, State)|Resp],
+    Resp2 = [ResponseBin|Responses],
     State2 = after_response(Pid, State),
     {next_state, started, State2#state{responses=Resp2}};
-handle_info({http, Pid, Result, Props}, 
+handle_info({http, Pid, {ok, {response_bin, ResponseBin}}}, 
 	    started,
-	   State=#state{waiting=Waiting, responses=Resp}) ->
+	   State=#state{waiting=Waiting, responses=Responses}) ->
     % if someone is wating, push the resp onto the stack,
     % update the state and reply to them
     {Reply, State2} = responses_reply(
-			[mk_response(Pid, Result, Props, State)|Resp],
+			[ResponseBin|Responses],
 			State),
     State3 = after_response(Pid, State2),
     % send replies
@@ -276,21 +276,6 @@ responses_reply(Responses, State=#state{procs=Procs}) ->
 		    {ok, {continue, Responses}}
 	    end,
     {Reply, State2}.
-
-mk_response(Pid, {ok, {Status, Headers, Body}}, Props, State) ->
-    #proc_item{request_msg=RequestMessage} = dict:fetch(
-					       Pid, 
-					       State#state.procs
-					      ),
-    RequestTime = proplists:get_value(time, Props, 0),
-    #response{
-       url=RequestMessage#request.url, 
-       status=Status, 
-       headers=[#header{key=N, value=V} || {N,V} <- Headers],
-       body=Body,
-       key=RequestMessage#request.key,
-       request_time=RequestTime
-      }.
 
 after_response(Pid, State) ->
     State#state{procs=dict:erase(Pid, State#state.procs)}.

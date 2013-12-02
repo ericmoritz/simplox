@@ -1,0 +1,1 @@
+-define(CLUSTER_NAME, smartcache_mcd_backend).

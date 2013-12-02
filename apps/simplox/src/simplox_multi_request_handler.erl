@@ -148,9 +148,14 @@ encode_responses([], _) ->
 encode_responses(Responses,
 		#state{media_type={<<"application">>,
 				   <<"protobuf+delimited+vnd.simplox.response">>,[]}}) ->
-    simplox_pb:encode(Responses);
+    Mapper = fun(ResponseBin) when is_binary(ResponseBin) ->
+		     [protobuffs:encode_varint(size(ResponseBin)),
+		      ResponseBin]
+	     end,
+    lists:map(Mapper, Responses);
 encode_responses(Responses, State) ->
-    Mapper = fun(Response) ->
+    Mapper = fun(ResponseBin) ->
+		     Response = simplox_pb:decode_response(ResponseBin),
 		     %% we can mismatch {Name, Value} and #header{} because header/1 can
 		     %% handle both
 		     Headers2 = [

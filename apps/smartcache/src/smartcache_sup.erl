@@ -26,10 +26,15 @@ start_link() ->
 init([]) ->
     
     % TODO: Make Backend configurable
-    BackendSup = {smartcache_dets_backend_sup,
-		  {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
-		  permanent, 2000, supervisor, [smartcache_dets_backend_sup]},
-    BackendMod = smartcache_dets_backend,
+    %% BackendSup = {smartcache_dets_backend_sup,
+    %% 		  {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
+    %% 		  permanent, 2000, supervisor, [smartcache_dets_backend_sup]},
+    %% BackendMod = smartcache_dets_backend,
+
+    Conf = smartcache_conf:init(),
+    
+    BackendMod = smartcache_conf:backend_mod(Conf),
+    BackendSup = smartcache_conf:backend_child_spec(Conf),
 
     ManagerSup = {smartcache_prefetch_manager_sup, 
 		  {smartcache_prefetch_manager_sup, start_link, []},
