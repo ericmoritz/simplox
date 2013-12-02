@@ -11,7 +11,7 @@
 -include_lib("simplox/include/simplox_pb.hrl").
 
 %% API
--export([start_link/2, start/2, send_req/5]).
+-export([start_link/2, start/2, send_req/6]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -142,40 +142,46 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 make_request(TargetPid, RequestMessage) ->
     folsom_metrics:notify({multi_request_running, {inc, 1}}),    
-    {Time, Result} = timer:tc(fun() -> send_req_cached(RequestMessage) end),
+    Response = send_req_cached(RequestMessage),
     folsom_metrics:notify({multi_request_running, {dec, 1}}),    
-    TargetPid ! {http, self(), Result, [{time, Time}]}.
+    TargetPid ! {http, self(), Response}.
 
 send_req_cached(RequestMessage=#request{cache=undefined}) ->
     send_req(
+      key(RequestMessage),
       url(RequestMessage),
       headers(RequestMessage),
       content_type(RequestMessage),
       method(RequestMessage),
       body(RequestMessage));
 send_req_cached(RequestMessage=#request{cache=Cache}) ->
-    Args = [url(RequestMessage),
-      headers(RequestMessage),
-      content_type(RequestMessage),
-      method(RequestMessage),
-      body(RequestMessage)],
-    smartcache_client:get(Cache#cache.key,
-		   {http_client, send_req, Args},
-		   Cache#cache.timeout).
+    Args = [key(RequestMessage),
+	    url(RequestMessage),
+	    headers(RequestMessage),
+	    content_type(RequestMessage),
+	    method(RequestMessage),
+	    body(RequestMessage)],
+    simplox:trace({smartcache_client, get}, 
+		  fun() -> smartcache_client:get(Cache#cache.key,
+						 {http_client, send_req, Args},
+						 Cache#cache.timeout) end).
 
-send_req(Url, Headers, ContentType, Method, undefined) ->
-    send_req(Url, Headers, ContentType, Method, []);
-send_req(Url, Headers, ContentType, Method, Body) ->
-    reply(send_req(?CLIENT, Url, Headers, ContentType, Method, Body)).
 
-send_req(lhttpc, Url, Headers, _ContentType, Method, Body) ->
+send_req(Key, Url, Headers, ContentType, Method, undefined) ->
+    send_req(Key, Url, Headers, ContentType, Method, []);
+send_req(Key, Url, Headers, ContentType, Method, Body) ->
+    response(Key, Url, timer:tc(fun() -> 
+			      reply(client_send_req(?CLIENT, Url, Headers, ContentType, Method, Body))
+		      end)).
+
+client_send_req(lhttpc, Url, Headers, _ContentType, Method, Body) ->
     lhttpc:request(Url, Method, Headers, Body, infinity);    
-send_req(ibrowse, Url, Headers, _ContentType, Method, Body) ->
+client_send_req(ibrowse, Url, Headers, _ContentType, Method, Body) ->
     %ibrowse:send_req(Url, Headers, Method, Body, []);
     ibrowse:send_req(Url, Headers, Method, Body, []);
-send_req(httpc, Url, Headers, undefined, Method, _Body) ->
+client_send_req(httpc, Url, Headers, undefined, Method, _Body) ->
     httpc:request(Method, {Url, Headers}, [], []);
-send_req(httpc, Url, Headers, ContentType, Method, Body) ->
+client_send_req(httpc, Url, Headers, ContentType, Method, Body) ->
     httpc:request(Method, {Url, Headers, ContentType, Body}, [], []).
 
 
@@ -189,6 +195,14 @@ reply({ok, StatusCode, Headers, Body}) -> % ibrowse
 reply(E={error, _}) ->
     E.
 
+response(Key, Url, {RequestTime, {ok, {Status, Headers, Body}}}) ->
+    {ok, #response{
+       key=Key,
+       url=Url, 
+       status=Status, 
+       headers=[#header{key=N, value=V} || {N,V} <- Headers],
+       body=Body,
+       request_time=RequestTime}}.
 
 headers(RequestMessage=#request{content_type=CT}) ->
     [{<<"content-type">>, CT} || CT =/= undefined] ++ 
@@ -196,6 +210,9 @@ headers(RequestMessage=#request{content_type=CT}) ->
 
 url(RequestMessage) ->
     binary_to_list(RequestMessage#request.url).
+
+key(RequestMessage) ->
+    RequestMessage#request.key.
 
 body(RequestMessage) ->
     RequestMessage#request.body.
@@ -207,3 +224,5 @@ method(#request{method=Method}) when is_list(Method)->
 
 content_type(#request{content_type=CT}) ->
     CT.
+     
+
