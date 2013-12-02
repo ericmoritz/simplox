@@ -196,13 +196,13 @@ reply(E={error, _}) ->
     E.
 
 response(Key, Url, {RequestTime, {ok, {Status, Headers, Body}}}) ->
-    {ok, #response{
+    {ok, {response_bin, iolist_to_binary(simplox_pb:encode_response(#response{
        key=Key,
        url=Url, 
        status=Status, 
        headers=[#header{key=N, value=V} || {N,V} <- Headers],
        body=Body,
-       request_time=RequestTime}}.
+       request_time=RequestTime}))}}.
 
 headers(RequestMessage=#request{content_type=CT}) ->
     [{<<"content-type">>, CT} || CT =/= undefined] ++ 
