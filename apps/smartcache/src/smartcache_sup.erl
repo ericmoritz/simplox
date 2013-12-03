@@ -24,25 +24,21 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    
-    % TODO: Make Backend configurable
-    %% BackendSup = {smartcache_dets_backend_sup,
-    %% 		  {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
-    %% 		  permanent, 2000, supervisor, [smartcache_dets_backend_sup]},
-    %% BackendMod = smartcache_dets_backend,
-
     Conf = smartcache_conf:init(),
-    
-    BackendMod = smartcache_conf:backend_mod(Conf),
-    BackendSup = smartcache_conf:backend_child_spec(Conf),
+    case smartcache_conf:backend_mod(Conf) of
+	undefined ->
+	    % smartcache is disabled
+	    {ok, { {one_for_one, 1000, 3600}, []} };
+	BackendMod ->
+	    BackendSups = smartcache_conf:backend_child_spec(Conf),
+	    ManagerSup = {smartcache_prefetch_manager_sup, 
+			  {smartcache_prefetch_manager_sup, start_link, []},
+			  permanent, 2000, supervisor, [smartcache_prefetch_manager_sup]},
 
-    ManagerSup = {smartcache_prefetch_manager_sup, 
-		  {smartcache_prefetch_manager_sup, start_link, []},
-		  permanent, 2000, supervisor, [smartcache_prefetch_manager_sup]},
+	    ClientSup = {smartcache_client_sup,
+			 {smartcache_client_sup, start_link, [BackendMod]},
+			 permanent, 2000, supervisor, [smartcache_client_sup]},
 
-    ClientSup = {smartcache_client_sup,
-		 {smartcache_client_sup, start_link, [BackendMod]},
-		 permanent, 2000, supervisor, [smartcache_client_sup]},
-
-    {ok, { {one_for_one, 1000, 3600}, [BackendSup, ManagerSup, ClientSup]} }.
+	    {ok, { {one_for_one, 1000, 3600}, BackendSups ++ [ManagerSup, ClientSup]} }
+    end.
 

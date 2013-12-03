@@ -6,7 +6,7 @@
 %%% Created : 20 Nov 2013 by Moritz <emoritz@GCI-EMORITZ-M.local>
 
 -module(smartcache_conf).
--define(BACKEND, mcd).
+-define(BACKEND, undefined).
 
 -export([init/0, backend_mod/1, backend_child_spec/1, pool_props/1]).
 
@@ -20,22 +20,24 @@ init() ->
 
 -spec backend_mod(config()) -> atom().
 backend_mod(_Conf) ->
-    case ?BACKEND of
+    case detect_backend() of
 	mcd ->
 	    smartcache_mcd_backend;
 	dets ->
 	    smartcache_dets_backend;
+        ets->
+	    smartcache_ets_backend;
 	_ ->
-	    smartcache_ets_backend
+	    undefined
     end.
 
 -spec backend_child_spec(config()) -> supervisor:child_spec().
 backend_child_spec(Conf) ->
-    case ?BACKEND of
+    case detect_backend() of
 	dets ->
-	    {smartcache_dets_backend_sup,
+	    [{smartcache_dets_backend_sup,
 	     {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
-	     permanent, 2000, supervisor, [smartcache_dets_backend_sup]};
+	     permanent, 2000, supervisor, [smartcache_dets_backend_sup]}];
 	mcd ->
 	    Nodes = [
 		     ["127.0.0.1", 11211],
@@ -43,13 +45,15 @@ backend_child_spec(Conf) ->
 		     ["127.0.0.1", 11213],
 		     ["127.0.0.1", 11214]
 		    ],
-	    {smartcache_mcd_backend_sup,
+	    [{smartcache_mcd_backend_sup,
 	     {smartcache_mcd_backend_sup, start_link, [Nodes, pool_props(Conf)]},
-	     permanent, 2000, supervisor, [smartcache_mcd_backend_sup]};
-	_ ->
-	    {smartcache_ets_backend_sup,
+	     permanent, 2000, supervisor, [smartcache_mcd_backend_sup]}];
+	ets ->
+	    [{smartcache_ets_backend_sup,
 	     {smartcache_ets_backend_sup, start_link, []},
-	     permanent, 2000, supervisor, [smartcache_ets_backend_sup]}
+	     permanent, 2000, supervisor, [smartcache_ets_backend_sup]}];
+	_ ->
+	    []
     end.
 
 pool_props(_Conf) ->
@@ -58,6 +62,9 @@ pool_props(_Conf) ->
      {max_overflow, 10}
     ].
 
+
 %get_value(Key, Conf) ->
 %    proplists:get_value(Key, Conf).
 
+detect_backend() ->
+    ?BACKEND.

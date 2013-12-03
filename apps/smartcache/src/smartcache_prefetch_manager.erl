@@ -100,7 +100,7 @@ handle_cast({notify, Key, ValueGenMFA, Timeout}, State) ->
     case find_timer(Key, ValueGenMFA, Timeout) of
 	% if not found, reset the birthdata and start the timer
 	{false, TimerData} ->
-	    lager:debug("notify: new timer ~p", [TimerData]),
+	    lager:info("notify: new timer ~p", [TimerData]),
 	    start_timer(reset_birthdate(TimerData));
 	% if found, reset the birthdate and store it
 	{true, TimerData} ->
