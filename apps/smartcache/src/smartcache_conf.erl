@@ -63,8 +63,10 @@ pool_props(_Conf) ->
     ].
 
 
-%get_value(Key, Conf) ->
-%    proplists:get_value(Key, Conf).
-
 detect_backend() ->
-    ?BACKEND.
+    case os:getenv("SMARTCACHE_BACKEND") of 
+	false ->
+	    ?BACKEND;
+	Backend ->
+	    list_to_atom(Backend)
+    end.

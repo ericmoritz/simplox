@@ -46,12 +46,15 @@ stop(Pid) ->
 %% @spec
 %% @end
 %%--------------------------------------------------------------------
-get(Key, ValueMFA, Timeout) ->
+get(Key, ValueMFA={M,F,A}, Timeout) ->
     %% contact the backend directly for a get, we don't need to spawn
     %% a client server
-    BackendMod = smartcache_conf:backend_mod(smartcache_conf:init()),
-    smartcache_prefetch_manager:notify(Key, ValueMFA, Timeout),
-    get_or_set(Key, ValueMFA, Timeout, BackendMod).
+    with_backend_mod(
+      fun(BackendMod) ->
+	      smartcache_prefetch_manager:notify(Key, ValueMFA, Timeout),
+	      get_or_set(Key, ValueMFA, Timeout, BackendMod)
+      end,
+      fun() -> erlang:apply(M,F,A) end).
 
 
 %%--------------------------------------------------------------------
@@ -68,10 +71,10 @@ refresh(Key, ValueGenMFA, Timeout) ->
 	      gen_server:cast(Pid, {refresh, Key, ValueGenMFA, Timeout})
       end).
 
-
 delete(Key) ->
-    BackendMod = smartcache_conf:backend_mod(smartcache_conf:init()),    
-    delete(BackendMod, Key).
+    with_backend_mod(
+      fun(BackendMod) -> delete(BackendMod, Key) end,
+      fun() -> ok end).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -123,9 +126,6 @@ handle_call(Msg, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({refresh, _, _, _}, State=#state{backend_mod=undefined}) ->
-    % do nothing if backend_mod is undefined
-    {noreply, State};
 handle_cast({refresh, Key, ValueGenMFA, Timeout}, State) ->
     update_if_not_found({error, not_found}, Key, ValueGenMFA, Timeout, 
 			State#state.backend_mod),
@@ -177,9 +177,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 -spec get_or_set(key(), mfa(), seconds(), atom()) -> {ok, iodata()} | {error, any()}.
-get_or_set(_, {M,F,A}, _, undefined) ->
-    % pass through if no backend is given
-    erlang:apply(M, F, A);
 get_or_set(Key, MFA, Timeout, Mod) ->
     Result = Mod:get(Key),
     case Result of
@@ -213,4 +210,12 @@ delete(BackendMod, Key) ->
 	    BackendMod:delete(Key);
 	false ->
 	    false
+    end.
+
+with_backend_mod(SomethingFun, NothingFun) ->
+    case smartcache_conf:backend_mod(smartcache_conf:init()) of
+	undefined ->
+	    NothingFun();
+	BackendMod ->
+	    SomethingFun(BackendMod)
     end.
