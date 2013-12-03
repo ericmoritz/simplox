@@ -7,7 +7,7 @@
 
 -module(smartcache_mcd_backend).
 
--export([get/1, set/3]).
+-export([get/1, set/3, delete/1]).
 -include("smartcache_mcd_backend.hrl").
 
 get(Key) ->
@@ -27,3 +27,6 @@ set(Key, Bin, Timeout) when is_binary(Bin) ->
 	E={error, _} ->
 	    E
     end.
+
+delete(Key) ->
+    mcd:do(?CLUSTER_NAME, delete, Key).

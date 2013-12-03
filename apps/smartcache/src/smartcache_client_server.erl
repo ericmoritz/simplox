@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 -include("smartcache.hrl").
 %% API
--export([start_link/1, stop/1, get/3, refresh/3]).
+-export([start_link/1, stop/1, get/3, refresh/3, delete/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -69,6 +69,10 @@ refresh(Key, ValueGenMFA, Timeout) ->
       end).
 
 
+delete(Key) ->
+    BackendMod = smartcache_conf:backend_mod(smartcache_conf:init()),    
+    delete(BackendMod, Key).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -120,7 +124,8 @@ handle_call(Msg, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({refresh, Key, ValueGenMFA, Timeout}, State) ->
-    update_if_not_found({error, not_found}, Key, ValueGenMFA, Timeout, State#state.backend_mod),
+    update_if_not_found({error, not_found}, Key, ValueGenMFA, Timeout, 
+			State#state.backend_mod),
     % run the valuefun and store the result,
     {noreply, State};
 handle_cast(Msg, State) ->
@@ -196,3 +201,10 @@ update_if_not_found({error, not_found}, Key, {M,F,A}, Timeout, Mod) ->
 update_if_not_found(E={error, _}, _, _, _, _) ->
     E.
 
+delete(BackendMod, Key) ->
+    case erlang:function_exported(BackendMod, delete, 1) of
+	true ->
+	    BackendMod:delete(Key);
+	false ->
+	    false
+    end.

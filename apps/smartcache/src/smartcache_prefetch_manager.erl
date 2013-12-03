@@ -20,8 +20,8 @@
 
 -define(SERVER, ?MODULE). 
 
--record(state, {}).
-
+-record(state, {old_age}).
+-record(timerdata, {key, gen, timeout, ref, birthdate}).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -54,7 +54,8 @@ start_link() ->
 init([]) ->
     % We may be restarted, start all the known timers again.
     start_timers(),
-    {ok, #state{}}.
+    % old age defaults to 60 seconds
+    {ok, #state{old_age=timer:seconds(20)}}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -96,14 +97,15 @@ handle_call(Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({notify, Key, ValueGenMFA, Timeout}, State) ->
-    % check the existance of the key.
-    case ets:lookup(?MANAGER_KEY_TAB, Key) of
-	% If the parameters haven't changed, do nothing
-	[{Key, ValueGenMFA, Timeout, _}] -> 
-	    pass;
-	% if missing or changed, reschedule the timer
-	_ ->
-	    start_timer(Key, ValueGenMFA, Timeout)
+    case find_timer(Key, ValueGenMFA, Timeout) of
+	% if not found, reset the birthdata and start the timer
+	{false, TimerData} ->
+	    lager:info("notify: new timer ~p", [TimerData]),
+	    start_timer(reset_birthdate(TimerData));
+	% if found, reset the birthdate and store it
+	{true, TimerData} ->
+	    lager:info("notify: existing timer ~p", [TimerData]),
+	    store_timer(Key, reset_birthdate(TimerData))
     end,
     {noreply, State};
 handle_cast(_Msg, State) ->
@@ -119,11 +121,24 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({update, Key, ValueGenMFA, Timeout}, State) ->
-    % cast the update to a cache client
-    smartcache_client:refresh(Key, ValueGenMFA, Timeout),
-    % reschedule the timer
-    start_timer(Key, ValueGenMFA, Timeout),
+handle_info({update, TD=#timerdata{key=Key, gen=ValueGenMFA, timeout=Timeout}}, 
+	    State) ->
+    case find_timer(Key, ValueGenMFA, Timeout) of
+	{true, TimerData} ->
+	    Age = timer:now_diff(os:timestamp(), TimerData#timerdata.birthdate) / 1000,
+	    if % if the timer has not aged out, refresh
+		Age =< State#state.old_age ->
+		    smartcache_client:refresh(Key, ValueGenMFA, Timeout),
+                    start_timer(TimerData);
+		true -> % If the timer has aged out, delete the timer and its data
+		    lager:info("~p is old ~p =< ~p, deleting", 
+			       [Key, Age, State#state.old_age]),
+		    delete_timer(TimerData)
+	    end;
+	{false, _} ->
+	    lager:info("stale timer update, purging: ~p", [TD]),
+	    delete_timer(TD)
+    end,
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -151,27 +166,55 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 start_timers() ->
     % start all the existing timers
-    ets:foldl(fun({Key, ValueMFA, Timeout, _}, Acc) ->
-		      start_timer(Key, ValueMFA, Timeout),
+    ets:foldl(fun({_, TimerData}, Acc) ->
+		      start_timer(TimerData),
 		      Acc
 	      end,
 	      0,
 	      ?MANAGER_KEY_TAB).
 
-start_timer(Key, ValueMFA, Timeout) ->
-    lager:info("Starting timer for ~p", [{Key, ValueMFA, Timeout}]),
-    %% cancel the existing timer
-    lists:foreach(fun({_, _, _, Ref}) -> erlang:cancel_timer(Ref) end,
-		  ets:lookup(?MANAGER_KEY_TAB, Key)),
 
+cancel_timer(undefined) ->
+    false;
+cancel_timer(Ref) ->
+    erlang:cancel_timer(Ref).
+
+start_timer(TimerData=#timerdata{timeout=Timeout, key=Key}) ->
+    lager:info("Starting timer for ~p", [TimerData]),
+
+    %% cancel the existing timer if scheduled
+    cancel_timer(TimerData#timerdata.ref),
     %% start the new timer 
     Ref = erlang:send_after(Timeout * 1000, self(), 
-			    {update, Key, ValueMFA, Timeout}),
-    %% update the record
-    ets:insert(?MANAGER_KEY_TAB, {Key, ValueMFA, Timeout, Ref}),
+			    {update, TimerData}),
+
+    store_timer(Key, TimerData#timerdata{ref=Ref}),
     ok.
+    
+reset_birthdate(TimerData) ->
+    TimerData#timerdata{birthdate=os:timestamp()}.
+
+find_timer(Key, ValueMFA, Timeout) ->
+    case ets:lookup(?MANAGER_KEY_TAB, Key) of 
+	[{Key, TimerData=#timerdata{key=Key, gen=ValueMFA, timeout=Timeout}}] ->
+		{true, TimerData};
+	[] ->
+            % if not found, create a new one.
+	    {false, 
+	     reset_birthdate(#timerdata{key=Key, gen=ValueMFA, timeout=Timeout})}
+	end.
+
+store_timer(Key, TimerData) ->
+    ets:insert(?MANAGER_KEY_TAB, {Key, TimerData}).
+
+delete_timer(#timerdata{key=Key, ref=Ref}) ->
+    cancel_timer(Ref),
+    smartcache_client:delete(Key),
+    ets:delete(?MANAGER_KEY_TAB, Key).
+    
