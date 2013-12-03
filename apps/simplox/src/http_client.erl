@@ -202,7 +202,6 @@ response(Key, Url, {RequestTime, {ok, {Status, Headers, Body}}}) ->
        headers=[#header{key=N, value=V} || {N,V} <- Headers],
        body=Body,
        request_time=RequestTime},
-    simplox_logger:log_response(Resp),
     {ok, iolist_to_binary(simplox_pb:encode_response(Resp))}.
 
 headers(RequestMessage=#request{content_type=CT}) ->
