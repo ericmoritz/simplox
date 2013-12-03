@@ -161,10 +161,9 @@ send_req_cached(RequestMessage=#request{cache=Cache}) ->
 	    content_type(RequestMessage),
 	    method(RequestMessage),
 	    body(RequestMessage)],
-    simplox:trace({smartcache_client, get}, 
-		  fun() -> smartcache_client:get(Cache#cache.key,
-						 {http_client, send_req, Args},
-						 Cache#cache.timeout) end).
+    smartcache_client:get(Cache#cache.key,
+			  {http_client, send_req, Args},
+			  Cache#cache.timeout).
 
 
 send_req(Key, Url, Headers, ContentType, Method, undefined) ->
@@ -196,13 +195,14 @@ reply(E={error, _}) ->
     E.
 
 response(Key, Url, {RequestTime, {ok, {Status, Headers, Body}}}) ->
-    {ok, iolist_to_binary(simplox_pb:encode_response(#response{
+    Resp = #response{
        key=Key,
        url=Url, 
        status=Status, 
        headers=[#header{key=N, value=V} || {N,V} <- Headers],
        body=Body,
-       request_time=RequestTime}))}.
+       request_time=RequestTime},
+    {ok, iolist_to_binary(simplox_pb:encode_response(Resp))}.
 
 headers(RequestMessage=#request{content_type=CT}) ->
     [{<<"content-type">>, CT} || CT =/= undefined] ++ 

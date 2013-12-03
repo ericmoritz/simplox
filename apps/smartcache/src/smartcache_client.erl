@@ -29,7 +29,7 @@ get(Key, ValueGenMFA, Timeout) ->
 %%--------------------------------------------------------------------
 -spec refresh(key(), mfa(), seconds()) -> ok.
 refresh(Key, ValueGenMFA, Timeout) ->
-    lager:info("Refreshing: ~p", [{Key, ValueGenMFA, Timeout}]),
+    lager:debug("Refreshing: ~p", [{Key, ValueGenMFA, Timeout}]),
     smartcache_client_server:refresh(Key, ValueGenMFA, Timeout).
 
 delete(Key) ->

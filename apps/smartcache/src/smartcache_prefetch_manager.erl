@@ -104,7 +104,7 @@ handle_cast({notify, Key, ValueGenMFA, Timeout}, State) ->
 	    start_timer(reset_birthdate(TimerData));
 	% if found, reset the birthdate and store it
 	{true, TimerData} ->
-	    lager:info("notify: existing timer ~p", [TimerData]),
+	    lager:debug("notify: existing timer ~p", [TimerData]),
 	    store_timer(Key, reset_birthdate(TimerData))
     end,
     {noreply, State};
@@ -131,12 +131,12 @@ handle_info({update, TD=#timerdata{key=Key, gen=ValueGenMFA, timeout=Timeout}},
 		    smartcache_client:refresh(Key, ValueGenMFA, Timeout),
                     start_timer(TimerData);
 		true -> % If the timer has aged out, delete the timer and its data
-		    lager:info("~p is old ~p =< ~p, deleting", 
+		    lager:debug("~p is old ~p =< ~p, deleting", 
 			       [Key, Age, State#state.old_age]),
 		    delete_timer(TimerData)
 	    end;
 	{false, _} ->
-	    lager:info("stale timer update, purging: ~p", [TD]),
+	    lager:debug("stale timer update, purging: ~p", [TD]),
 	    delete_timer(TD)
     end,
     {noreply, State}.
@@ -186,7 +186,7 @@ cancel_timer(Ref) ->
     erlang:cancel_timer(Ref).
 
 start_timer(TimerData=#timerdata{timeout=Timeout, key=Key}) ->
-    lager:info("Starting timer for ~p", [TimerData]),
+    lager:debug("Starting timer for ~p", [TimerData]),
 
     %% cancel the existing timer if scheduled
     cancel_timer(TimerData#timerdata.ref),
