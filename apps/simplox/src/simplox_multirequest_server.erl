@@ -88,7 +88,7 @@ responses(SupPid, Timeout) ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    Timeout = 10000,
+    Timeout = 60000,
     {ok, waiting, #state{}, Timeout}.
 
 %%--------------------------------------------------------------------
@@ -193,15 +193,14 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({http, Pid, {ok, ResponseBin}}, 
+handle_info({http, _Pid, {ok, ResponseBin}}, 
 	    started, 
 	    State=#state{waiting=[], responses=Responses}) ->
     % if no one is waiting for a response, push the response onto the 
     % stack
     Resp2 = [ResponseBin|Responses],
-    State2 = after_response(Pid, State),
-    {next_state, started, State2#state{responses=Resp2}};
-handle_info({http, Pid, {ok, ResponseBin}}, 
+    {next_state, started, State#state{responses=Resp2}};
+handle_info({http, _Pid, {ok, ResponseBin}}, 
 	    started,
 	   State=#state{waiting=Waiting, responses=Responses}) ->
     % if someone is wating, push the resp onto the stack,
@@ -209,13 +208,12 @@ handle_info({http, Pid, {ok, ResponseBin}},
     {Reply, State2} = responses_reply(
 			[ResponseBin|Responses],
 			State),
-    State3 = after_response(Pid, State2),
     % send replies
     [gen_fsm:reply(From, Reply) || From <- Waiting],
     % continue
-    {next_state, started, State3#state{waiting=[]}};
+    {next_state, started, State2#state{waiting=[]}};
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, _, State) ->
-    % make sure the proc is removed
+    % remove the pid from the dict
     State2 = after_response(Pid, State),
     {next_state, started, State2};
 handle_info(timeout, _, State) ->

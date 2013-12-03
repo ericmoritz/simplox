@@ -1,1 +1,1 @@
--define(CLUSTER_NAME, smartcache_mcd_backend).
+-define(POOL_NAME, smartcache_mcd_backend).

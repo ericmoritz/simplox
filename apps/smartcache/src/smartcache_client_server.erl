@@ -178,7 +178,7 @@ get_or_set(Key, MFA, Timeout, Mod) ->
     Result = Mod:get(Key),
     case Result of
 	{error, not_found} ->
-	    lager:info("Cache Miss: ~p", [{Key, MFA, Timeout}]);
+	    lager:debug("Cache Miss: ~p", [{Key, MFA, Timeout}]);
 	_ ->
 	    pass
     end,
