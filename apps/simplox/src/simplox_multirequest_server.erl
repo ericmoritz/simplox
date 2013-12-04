@@ -202,7 +202,7 @@ handle_info({http, _Pid, {ok, ResponseBin}},
     {next_state, started, State#state{responses=Resp2}};
 handle_info({http, _Pid, {ok, ResponseBin}}, 
 	    started,
-	   State=#state{waiting=Waiting, responses=Responses}) ->
+	    State=#state{waiting=Waiting, responses=Responses}) ->
     % if someone is wating, push the resp onto the stack,
     % update the state and reply to them
     {Reply, State2} = responses_reply(

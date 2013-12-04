@@ -11,8 +11,8 @@
 -module(simplox_multi_request_handler).
 -compile([{parse_transform, lager_transform}]).
 -record(state, {boundary, media_type, multirequest, multirequest_pid}).
+-type request() :: cowboy_req:request().
 
--define(CRLF, <<"\r\n">>).
 -include_lib("simplox/include/simplox_pb.hrl").
 
 -export([
@@ -21,12 +21,15 @@
 	 allowed_methods/2,
 	 content_types_provided/2, 
 	 content_types_accepted/2,
-	 multirequest_parser/2,
-	 html_get_response/2,
+	 multirequest_handler/2,
+	 html_resource/2,
 	 rest_terminate/2
 	]).
 
 
+%%%===================================================================
+%%% cowboy rest callbacks
+%%%===================================================================
 init(_Transport, _Req, _Opts) ->
     {upgrade, protocol, cowboy_rest}.
 
@@ -40,30 +43,107 @@ allowed_methods(Req, State) ->
 
 content_types_accepted(Req, State) ->
     {[
-     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_parser}
+     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_handler}
     ], Req, State}.
 
+content_types_provided(Req, State) ->
+    case cowboy_req:method(Req) of
+	{<<"GET">>, Req1} ->
+	    {[{<<"text/html">>, html_resource}], Req1, State};
+	{<<"POST">>, Req1} ->
+	    % TODO: move this to the multipart only code
+	    Boundary = simplox_multipart:make_boundary(),
+	    State1 = State#state{boundary=Boundary},
 
-multirequest_parser(Req, State) ->
+	    % NOTE: the '_' is here because the resource callback isn't used for
+	    % a POST
+	    {[
+	      {{<<"multipart">>, <<"mixed">>, '*'}, '_'},
+	      {<<"application/protobuf+delimited+vnd.simplox.response">>, '_'}
+	     ], 
+	     Req1, State1}
+    end.
+
+
+rest_terminate(_Req, _) ->
+    ok.
+
+%%%===================================================================
+%%% Resource callbacks
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% The multirequest POST body handler. 
+%% It parses the POST body and sets the response streamer
+%% @end
+%%--------------------------------------------------------------------
+-spec multirequest_handler(request(), #state{}) -> {true | false, request(), #state{}}.
+multirequest_handler(Req, State) ->
     {MediaType, Req1} = cowboy_req:meta(media_type, Req),
     {ok, Body, Req2} = cowboy_req:body(Req1),
     State1 = State#state{media_type=MediaType},
-    case decode_multirequest(Body) of 
-	{error, Reason} ->
-	    Req3 = cowboy_req:set_resp_header(
-		     <<"content-type">>,
-		     <<"text/plain">>,
-		     cowboy_req:set_resp_body(io_lib:format("~s~n", [Reason]), Req2)),
-	    {false, Req3, State1};
-	{ok, MultiRequest} -> 
-	    State2 = spawn_request_procs(MultiRequest, State1),
-            Req3 = set_resp_content_type(
-		     State2,
-		     cowboy_req:set_resp_body_fun(
-		       chunked, multipart_streamer(Req2, State2), Req2)),
-	    {true, Req3, State2}
-    end.
+    handle_multirequest(Req2, State1, simplox_multirequest_pb:decode(Body)).
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% The generic response for a GET request
+%% @end
+%%--------------------------------------------------------------------
+-spec html_resource(request(), #state{}) -> {iodata(), request(), #state{}}.
+html_resource(Req, State) ->
+    Body = <<"<html>
+<body>
+<p>No docs yet.</p>
+</body></html>">>,
+    {Body, Req, State}.
+
+
+%%%===================================================================
+%%% Internal
+%%%===================================================================
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Handle the decoded multirequest.
+%% This response with an error response if the validation failed
+%% or sets the response streamer
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_multirequest(request(), #state{}, {ok, #multirequest{}} | {error, any()}) 
+			 -> {true | false, request(), #state{}}.
+handle_multirequest(Req, State, E={error, _}) ->
+    {false, handle_error(Req, E), State};
+handle_multirequest(Req, State, {ok, MultiRequest}) ->
+    State2 = spawn_request_procs(MultiRequest, State),
+    Req2 = set_resp_content_type(
+	     State2,
+	     cowboy_req:set_resp_body_fun(
+	       chunked, 
+	       fun(F) -> multiresponse_wait_loop(Req, State, F) end,
+	       Req)),
+    {true, Req2, State2}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% The generic {error, any()} response
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_error(request(), {error, any()}) -> request().
+handle_error(Req, E={error, _}) ->
+    cowboy_req:set_resp_header(
+      <<"content-type">>,
+      <<"text/plain">>,
+      cowboy_req:set_resp_body(io_lib:format("~p~n", [E]), Req)).
+    
+%%--------------------------------------------------------------------
+%% @doc
+%% Updates the content-type header according to the accepted media type
+%% @end
+%%--------------------------------------------------------------------
+-spec set_resp_content_type(#state{}, request()) -> request().
 set_resp_content_type(#state{media_type={X = <<"application">>,
 					 Y = <<"protobuf+delimited+vnd.simplox.response">>,[]}}, Req) ->
     cowboy_req:set_resp_header(
@@ -76,20 +156,12 @@ set_resp_content_type(#state{boundary=Boundary}, Req) ->
       [<<"multipart/mixed; boundary=">>, Boundary], Req).
 
 
-decode_multirequest(Body) ->
-    try     
-	case simplox_pb:decode_multirequest(Body) of
-	    #multirequest{requests=[]} ->
-		{error, "MultiRequest.requests required"};
-	    Msg ->
-		{ok, Msg}
-	end
-    catch Error ->
-	    ErrorStr = io_lib:format("Error decoding body: ~p", [Error]),
-	    {error, ErrorStr}
-    end.
-
-
+%%--------------------------------------------------------------------
+%% @doc
+%% Spawns the multirequest server FSM
+%% @end
+%%--------------------------------------------------------------------
+-spec spawn_request_procs(#multirequest{}, #state{}) -> #state{}.
 spawn_request_procs(MultiRequest, State) ->
     {ok, started} = simplox_multirequest_server:fetch(
 		      State#state.multirequest_pid,
@@ -97,92 +169,82 @@ spawn_request_procs(MultiRequest, State) ->
     State#state{multirequest=MultiRequest}.
 
 
-content_types_provided(Req, State) ->
-    case cowboy_req:method(Req) of
-	{<<"GET">>, Req1} ->
-	    {[{<<"text/html">>, html_get_response}], Req1, State};
-	{<<"POST">>, Req1} ->
-	    Boundary = make_boundary(),
-	    State1 = State#state{boundary=Boundary},
-	    {[
-	      {{<<"multipart">>, <<"mixed">>, '*'},
-	       '_'},
-	      {<<"application/protobuf+delimited+vnd.simplox.response">>,
-	       '_'}
-	     ], Req1, State1}
-    end.
-
-
-rest_terminate(_Req, _) ->
-    %Stop = os:timestamp(),
-    %lager:info("~p", [timer:now_diff(Stop, Start) / 1000000]),
-    ok.
-
-html_get_response(Req, State) ->
-    Body = <<"<html>
-<body>
-<p>Hello, World!</p>
-</body></html>">>,
-    {Body, Req, State}.
-
-multipart_streamer(Req, State) ->
-    fun(F) ->
-	    stream_loop(Req, State, F)
-    end.
-
-stream_loop(Req, State, F) ->
+%%--------------------------------------------------------------------
+%% @doc
+%% Waits for responses from the multirequest server
+%% @end
+%%--------------------------------------------------------------------
+-type chunked_fun() :: fun((iodata()) -> ok | {error, atom()}).
+-spec multiresponse_wait_loop(request(), #state{}, chunked_fun()) -> ok.
+multiresponse_wait_loop(Req, State, F) ->
+    % TODO: handle errors
     {ok, {Status, Responses}} = simplox_multirequest_server:responses(
 		     State#state.multirequest_pid, 10000),
     F(encode_responses(Responses, State)),
     case Status of
 	continue ->
-	    stream_loop(Req, State, F);
+	    multiresponse_wait_loop(Req, State, F);
 	done ->
 	    ok
     end.
 
-
-%% This will change based on the media type
+%%--------------------------------------------------------------------
+%% @doc
+%% Encodes the responses based on the accepted media type
+%% @end
+%%--------------------------------------------------------------------
+-spec encode_responses([binary()], #state{}) -> iodata().
 encode_responses([], _) ->
     [];
-encode_responses(Responses,
+encode_responses(ResponseBins,
 		#state{media_type={<<"application">>,
 				   <<"protobuf+delimited+vnd.simplox.response">>,[]}}) ->
-    Mapper = fun(ResponseBin) when is_binary(ResponseBin) ->
-		     [protobuffs:encode_varint(size(ResponseBin)),
-		      ResponseBin]
-	     end,
-    lists:map(Mapper, Responses);
-encode_responses(Responses, State) ->
-    Mapper = fun(ResponseBin) ->
-		     Response = simplox_pb:decode_response(ResponseBin),
-		     %% we can mismatch {Name, Value} and #header{} because header/1 can
-		     %% handle both
-		     Headers2 = [
-				 {<<"X-Status">>, Response#response.status},
-				 {<<"X-Request-Time">>, [integer_to_list(Response#response.request_time), " us"]},
-				 {<<"Content-Location">>, Response#response.url}
-				]
-			 ++ [{<<"X-Simplox-Key">>, Response#response.key} ||
-				Response#response.key =/= undefined]
-			 ++ Response#response.headers,
-		     [
-		      ?CRLF, <<"--">>, State#state.boundary, ?CRLF,
-		      lists:map(fun header/1, Headers2),
-		      ?CRLF, 
-		      Response#response.body]
-	     end,
-    lists:map(Mapper, Responses).
+    map_responses(fun delimited_protobin/1, ResponseBins);
+encode_responses(ResponseBins, 
+		 #state{boundary=Boundary,
+			media_type={<<"multipart">>,
+				    <<"mixed">>,[]}}) ->
+    map_responses(fun(ResBin) -> simplox_multipart:response(Boundary, ResBin) end, ResponseBins).
 
 
-header({Name, Value}) ->
-    [Name, ": ", Value, ?CRLF];
-header(#header{key=Name, value=Value}) ->
-    header({Name, Value}).
-	      
+%%--------------------------------------------------------------------
+%% @doc
+%% Builds an protobuff delimited iodata list
+%% This is simply a protobuf varint size prefix; pretty simple
+%%
+%% This may be better of in another module if we end up with more
+%% protocols that use it.
+%% @end
+%%--------------------------------------------------------------------
+-spec delimited_protobin(binary()) -> iodata().
+delimited_protobin(ProtoBin) when is_binary(ProtoBin) ->
+    [protobuffs:encode_varint(size(ProtoBin)),
+     ProtoBin].
+    
 
+%%--------------------------------------------------------------------
+%% @doc
+%% A generic function for mapping each response bin to a streamed
+%% response.  This was added so I can log each response regardless
+%% of the accepted media type.
+%% @end
+%%--------------------------------------------------------------------
+-type response_mapper() :: fun((binary()) -> iodata()).
+-spec map_responses(response_mapper(), [binary()]) -> iodata().
+map_responses(Mapper, ResponseBins) ->
+    lists:map(
+      fun(ResBin) ->
+	      toss(
+		simplox_logging:response_end(ResBin),
+		Mapper(ResBin))
+      end,
+      ResponseBins
+     ).
 
-make_boundary() ->
-    % TODO: Do a random boundary function
-    <<"gc0p4Jq0M2Yt08jU534c0p">>.
-
+%%--------------------------------------------------------------------
+%% @doc
+%% A silly function to avoid temp vars
+%% @end
+%%--------------------------------------------------------------------
+toss(_, Val) ->
+    Val.
