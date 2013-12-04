@@ -40,10 +40,7 @@ backend_child_spec(Conf) ->
 	     permanent, 2000, supervisor, [smartcache_dets_backend_sup]}];
 	mcd ->
 	    Nodes = [
-		     ["127.0.0.1", 11211],
-		     ["127.0.0.1", 11212],
-		     ["127.0.0.1", 11213],
-		     ["127.0.0.1", 11214]
+		     ["127.0.0.1", 11211]
 		    ],
 	    [{smartcache_mcd_backend_sup,
 	     {smartcache_mcd_backend_sup, start_link, [Nodes, pool_props(Conf)]},

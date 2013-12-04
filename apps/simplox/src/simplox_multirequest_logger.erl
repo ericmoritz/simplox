@@ -19,7 +19,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {mr_start, r_times=dict:new()}).
 
 %%%===================================================================
 %%% API
@@ -120,13 +120,13 @@ handle_cast({multirequest_start, _MR}, State) ->
       State,
       <<"multirequest_start">>,
       []),
-    {noreply, State};
+    {noreply, start_mr_time(State)};
 handle_cast({multirequest_end, _MR}, State) ->
     log_json(
       info,
       State,
       <<"multirequest_end">>,
-      []),
+      [{<<"elapsed">>, us_str(mr_elapsed(State))}]),
     {noreply, State};
 handle_cast({request_start, RequestPid, _Request}, State) ->
     log_json(
@@ -134,7 +134,7 @@ handle_cast({request_start, RequestPid, _Request}, State) ->
       State,
       <<"request_start">>,
       [{<<"request_pid">>, pid_to_binary(RequestPid)}]),
-    {noreply, State};
+    {noreply, start_r_time(RequestPid, State)};
 handle_cast({request_end, RequestPid, ResponseBin}, State) ->
     Response = simplox_pb:decode_response(ResponseBin),
     log_json(
@@ -143,6 +143,7 @@ handle_cast({request_end, RequestPid, ResponseBin}, State) ->
       <<"request_end">>,
       [
        {<<"request_pid">>, pid_to_binary(RequestPid)},
+       {<<"elapsed">>, us_str(r_elapsed(RequestPid, State))},
        {<<"key">>, cast_str(Response#response.key)},
        {<<"url">>, cast_str(Response#response.url)},
        {<<"method">>, cast_str(Response#response.method)},
@@ -223,3 +224,18 @@ log(debug, Msg, Args) ->
     lager:debug(Msg, Args);
 log(info, Msg, Args) ->
     lager:info(Msg, Args).
+
+start_mr_time(State) ->
+    State#state{mr_start=os:timestamp()}.
+
+mr_elapsed(#state{mr_start=Start}) ->
+    timer:now_diff(os:timestamp(), Start).
+
+start_r_time(Pid, State) ->
+    State#state{r_times=dict:store(Pid, os:timestamp(), State#state.r_times)}.
+
+r_elapsed(Pid, #state{r_times=RT}) ->
+    timer:now_diff(os:timestamp(), dict:fetch(Pid, RT)).
+      
+us_str(US) ->
+    iolist_to_binary(io_lib:format("~p us", [US])).
