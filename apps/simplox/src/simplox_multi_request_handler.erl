@@ -65,7 +65,7 @@ content_types_provided(Req, State) ->
     end.
 
 
-rest_terminate(_Req, _) ->
+rest_terminate(_Req, _State) ->
     ok.
 
 %%%===================================================================
@@ -225,26 +225,11 @@ delimited_protobin(ProtoBin) when is_binary(ProtoBin) ->
 %%--------------------------------------------------------------------
 %% @doc
 %% A generic function for mapping each response bin to a streamed
-%% response.  This was added so I can log each response regardless
-%% of the accepted media type.
+%% response.  
 %% @end
 %%--------------------------------------------------------------------
 -type response_mapper() :: fun((binary()) -> iodata()).
 -spec map_responses(response_mapper(), [binary()]) -> iodata().
 map_responses(Mapper, ResponseBins) ->
-    lists:map(
-      fun(ResBin) ->
-	      toss(
-		simplox_logging:response_end(ResBin),
-		Mapper(ResBin))
-      end,
-      ResponseBins
-     ).
+    [Mapper(R) || R <- ResponseBins].
 
-%%--------------------------------------------------------------------
-%% @doc
-%% A silly function to avoid temp vars
-%% @end
-%%--------------------------------------------------------------------
-toss(_, Val) ->
-    Val.
