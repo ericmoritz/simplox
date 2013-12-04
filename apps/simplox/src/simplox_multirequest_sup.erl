@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, multirequest_pid/1, client_sup_pid/1]).
+-export([start_link/0, multirequest_pid/1, client_sup_pid/1, logger_pid/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -37,6 +37,9 @@ multirequest_pid(SupPid) ->
 
 client_sup_pid(SupPid) ->
     first(find_children(SupPid, http_client_sup)).
+
+logger_pid(SupPid) ->
+    first(find_children(SupPid, simplox_multirequest_logger)).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -72,12 +75,17 @@ init([]) ->
 			 permanent, 1000, worker, 
 			 [simplox_multirequest_server]},
 
+    LoggerChild = {simplox_multirequest_logger,
+			 {simplox_multirequest_logger, start_link, []},
+			 permanent, 1000, worker, 
+			 [simplox_multirequest_logger]},
+
     ClientSup = {http_client_sup, 
 		 {http_client_sup, start_link, []}, 
 		 permanent, 1000, supervisor, 
 		 [http_client_sup]},
 
-    {ok, {SupFlags, [MultiRequestChild, ClientSup]}}.
+    {ok, {SupFlags, [LoggerChild, MultiRequestChild, ClientSup]}}.
 
 %%%===================================================================
 %%% Internal functions

@@ -14,7 +14,7 @@
 -export([start_link/0, fetch/2, responses/2]).
 
 %% gen_fsm callbacks
--export([init/1, waiting/3,  started/3, handle_event/3,
+-export([init/1, waiting/3,  started/3, stopped/3, handle_event/3,
 	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -define(SERVER, ?MODULE).
@@ -23,6 +23,7 @@
 		procs=dict:new(), 
 		start=os:timestamp(),
 		client_sup_pid,
+		log,
 		responses=[],
 		waiting=[]
 	       }).
@@ -55,8 +56,9 @@ start_link() ->
 fetch(SupPid, MultiRequest) ->
     {ok, Pid} = simplox_multirequest_sup:multirequest_pid(SupPid),
     {ok, ClientSupPid} = simplox_multirequest_sup:client_sup_pid(SupPid),
+    {ok, LogPid} = simplox_multirequest_sup:logger_pid(SupPid),
     gen_fsm:sync_send_event(Pid, 
-			    {fetch, ClientSupPid, MultiRequest}).
+			    {fetch, ClientSupPid, LogPid, MultiRequest}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -74,75 +76,64 @@ responses(SupPid, Timeout) ->
 %%% gen_fsm callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
-%% gen_fsm:start_link/[3,4], this function is called by the new
-%% process to initialize.
-%%
-%% @spec init(Args) -> {ok, StateName, State} |
-%%                     {ok, StateName, State, Timeout} |
-%%                     ignore |
-%%                     {stop, StopReason}
-%% @end
-%%--------------------------------------------------------------------
 init([]) ->
     Timeout = 60000,
     {ok, waiting, #state{}, Timeout}.
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_event/[2,3], the instance of this function with
-%% the same name as the current state name StateName is called to
-%% handle the event.
-%%
-%% @spec state_name(Event, From, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {reply, Reply, NextStateName, NextState} |
-%%                   {reply, Reply, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState} |
-%%                   {stop, Reason, Reply, NewState}
+%% We start in the waiting state, we only accept a single fetch event
 %% @end
 %%--------------------------------------------------------------------
-waiting({fetch, ClientSupPid, MultiRequest}, _From, State) ->
-    State2 = spawn_request_procs(ClientSupPid, MultiRequest, State),
+waiting({fetch, ClientSupPid, LogPid, MultiRequest}, _From, State) ->
+    simplox_multirequest_logger:multirequest_start(LogPid, MultiRequest),
+    State2 = spawn_request_procs(ClientSupPid, MultiRequest, 
+				 State#state{log=LogPid}),
     Reply = {ok, started},
     {reply, Reply, started, State2#state{client_sup_pid=ClientSupPid}};
-waiting(responses, _From, State) ->
+waiting(_, _From, State) ->
     {reply, {error, not_started}, waiting, State}.
 
-started({fetch, _,_}, _From, State) ->
-    {reply, {error, started}, started, State};
-started(responses, From, 
-	State=#state{responses=Resp, procs=Procs, waiting=Waiting}
-       ) ->
-    case {Resp, dict:size(Procs)} of
-	{Resp, 0} ->
-	    {Reply, State2} = responses_reply(Resp, State), 
-	    {reply, 
-	     Reply,
-	     started,
-	     State2};
-	{[], _} ->
-	    % no collected responses, push the From onto the wait list
-	    % and defer the reply
-	    {next_state, started, State#state{waiting=[From|Waiting]}};
-	{Resp, _} ->
-	    % reply with the collected responses regardless of
-	    % the size
-	    {Reply, State2} = responses_reply(Resp, State), 
-	    {reply, 
-	     Reply,
-	     started,
-	     State2}
-    end.
-    % if not responses are waiting to be collected
+%%--------------------------------------------------------------------
+%% @doc
+%% Once started, we only accept responses events
+%% @end
+%%--------------------------------------------------------------------
+started(responses, From, State) ->
+    case {responses_recieved(State), still_pending(State)} of
+	% no responses pending and no more running clients
+	% we're done.
+	{false, false} ->
+	    % reply with a done response
+	    {Reply, State2} = responses_reply({[], State}, false), 
+	    % switch to the stopped state, we're done.
+	    {reply, log_reply(Reply, State2), stopped, State2};
+	{true, _} ->
+	    % if we've collect some responses, send them to whoever is
+	    % waiting including ourselves.
+	    State2 = reply_to_waiting(
+		       push_waiting(
+			 From,
+			 State)),
+	    {next_state, started, State2};
+	{false, true} ->
+	    % If we haven't collected any responses but we're still running,
+	    % push the client onto the waiting list
+	    {next_state, started, push_waiting(From, State)}
+    end;
+started(_, _From, State) ->
+    {reply, {error, started}, started, State}.
 
+%%--------------------------------------------------------------------
+%% @doc
+%% We eventually move into the stopped state when all the responses
+%% are collected
+%% @end
+%%--------------------------------------------------------------------
+stopped(responses, _, State) ->
+    {reply, {done, []}, stopped, State};
+stopped(_, _, State) ->
+    {reply, {error, stopped}, stopped, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -157,8 +148,8 @@ started(responses, From,
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_event(_Event, StateName, State) ->
-    {next_state, StateName, State}.
+handle_event(done, _StateName, State) ->
+    {next_state, stopped, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -193,34 +184,33 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({http, _Pid, {ok, ResponseBin}}, 
+handle_info({http, Pid, {ok, ResponseBin}}, 
 	    started, 
-	    State=#state{waiting=[], responses=Responses}) ->
-    % if no one is waiting for a response, push the response onto the 
-    % stack
-    Resp2 = [ResponseBin|Responses],
-    {next_state, started, State#state{responses=Resp2}};
-handle_info({http, _Pid, {ok, ResponseBin}}, 
+	    State=#state{waiting=[]}) ->
+    % if no one is waiting, just push the responses 
+    % using on_responsebin and continue
+    on_responsebin(
+      Pid,
+      ResponseBin, 
+      State,
+      fun(State2) ->
+	      {next_state, started, State2}
+      end);
+handle_info({http, Pid, {ok, ResponseBin}}, 
 	    started,
-	   State=#state{waiting=Waiting, responses=Responses}) ->
-    % if someone is wating, push the resp onto the stack,
-    % update the state and reply to them
-    {Reply, State2} = responses_reply(
-			[ResponseBin|Responses],
-			State),
-    % send replies
-    [gen_fsm:reply(From, Reply) || From <- Waiting],
-    % continue
-    {next_state, started, State2#state{waiting=[]}};
-handle_info({'DOWN', _Ref, process, Pid, _Reason}, _, State) ->
-    % remove the pid from the dict
-    State2 = after_response(Pid, State),
-    {next_state, started, State2};
+	    State) ->
+    % if clients are waiting, reply to waiting
+    on_responsebin(
+      Pid,
+      ResponseBin,
+      State,
+      fun(State2) -> {next_state, started, reply_to_waiting(State2)} end
+    );
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, Status, State) ->
+    {next_state, Status, proc_delete(Pid, State)};
 handle_info(timeout, _, State) ->
     io:format("Timeout waiting for responses", []),
     {stop, timeout, State}.
-		     
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -251,29 +241,120 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Spawn the request procecsses
+%% These concurrently fetch the resources
+%% @end
+%%--------------------------------------------------------------------
+-spec spawn_request_procs(pid(), #multirequest{}, #state{}) -> #state{}.
 spawn_request_procs(ClientSupPid, MultiRequest, State) ->
-    State#state{
-      multirequest=MultiRequest,
-      procs=dict:from_list(lists:map(fun(Req) -> spawn_request(ClientSupPid, Req) end, 
-				     MultiRequest#multirequest.requests))}.
+    lists:foldl(
+      fun(Req, StateAcc) -> spawn_request(ClientSupPid, Req, StateAcc) end,
+      State#state{multirequest=MultiRequest},
+      MultiRequest#multirequest.requests
+     ).
 
-spawn_request(ClientSupPid, RequestMessage) ->
-    Self = self(),
-    Start = os:timestamp(),
-    {ok, Pid} = http_client_sup:start_child(
-		  ClientSupPid, Self, RequestMessage),
+-spec spawn_request(pid(), #request{}, #state{}) -> #state{}.
+spawn_request(ClientSupPid, RequestMessage, State=#state{log=Log}) ->
+    {ok, Pid} = http_client_sup:start_child(ClientSupPid, self(), RequestMessage),
+    simplox_multirequest_logger:request_start(Log, Pid, RequestMessage),
     monitor(process, Pid),
-    {Pid, #proc_item{request_msg=RequestMessage, start=Start}}.
+    proc_add(Pid, 
+	     #proc_item{request_msg=RequestMessage, start=os:timestamp()}, 
+	     State).
 
-responses_reply(Responses, State=#state{procs=Procs}) ->
-    State2 = State#state{responses=[]},
-    Reply = case dict:size(Procs) of
-		0 ->
-		    {ok, {done, Responses}};
-		_ ->
-		    {ok, {continue, Responses}}
-	    end,
-    {Reply, State2}.
+%%--------------------------------------------------------------------
+%% @doc
+%% Creates a response reply based on the current state
+%% @end
+%%--------------------------------------------------------------------
+-spec responses_reply(#state{}) -> {{ok, {done | continue, [binary()]}}, #state{}}.
+responses_reply(State) ->
+    responses_reply(pop_responses(State), still_pending(State)).
 
-after_response(Pid, State) ->
-    State#state{procs=dict:erase(Pid, State#state.procs)}.
+-spec responses_reply({[binary()], #state{}}, integer()) 
+		     -> {{ok, {done | continue, [binary()]}}, #state{}}.
+responses_reply({Responses, State}, false) ->
+    {{ok, {done, Responses}}, State};
+responses_reply({Responses, State}, _) ->
+    {{ok, {continue, Responses}}, State}.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% A generic function that handles incomming response binaries
+%% It does the general setup and clean before the actual handler does its
+%% work.
+%% @end
+%%--------------------------------------------------------------------
+-type on_responsebin_cb() :: fun((#state{}) -> #state{}).
+-spec on_responsebin(pid(), binary(), #state{}, on_responsebin_cb()) -> #state{}.
+on_responsebin(RequestPid, ResponseBin, State, F) ->
+    % push the response onto the response stack and 
+    % remove the request pid from the dict
+    % log the response
+    simplox_multirequest_logger:request_end(State#state.log, RequestPid, ResponseBin),
+    F(
+      proc_delete(
+	RequestPid,
+	push_response(ResponseBin, State))).
+
+
+
+%%%===================================================================
+%%% State field functions
+%%%===================================================================
+responses_recieved(#state{responses=[]}) ->
+    false;
+responses_recieved(_) ->
+    true.
+
+still_pending(#state{procs=Procs}) ->    
+    case dict:size(Procs) of
+	0 ->
+	    false;
+	_ ->
+	    true
+    end.
+
+proc_add(Pid, ProcItem, State) ->
+    State#state{procs=dict:store(Pid, ProcItem, State#state.procs)}.
+
+proc_delete(RequestPid, State) ->
+    State#state{procs=dict:erase(RequestPid, State#state.procs)}.    
+
+
+pop_responses(State) ->
+    {State#state.responses, State#state{responses=[]}}.
+
+push_response(ResponseBin, State=#state{responses=ResponseBins}) ->
+    State#state{responses=[ResponseBin|ResponseBins]}.
+
+
+pop_waiting(State) ->
+    {State#state.waiting, State#state{waiting=[]}}.
+
+push_waiting(From, State) ->
+    State#state{waiting=[From|State#state.waiting]}.
+
+reply_to_waiting(State) ->
+    {Reply, State2} = responses_reply(State),
+    {Waiting, State3} = pop_waiting(State2),
+    [gen_fsm:reply(From, Reply) || From <- Waiting],
+    log_reply(Reply, State),
+    stop_if_done(Reply),
+    State3.
+
+log_reply({ok, {done, _}}, State) ->
+    simplox_multirequest_logger:multirequest_end(State#state.log, State#state.multirequest),
+    true;
+log_reply(_, _) ->
+    false.
+
+
+stop_if_done({ok, {done, _}}) ->
+    gen_fsm:send_all_state_event(self(), done),
+    true;
+stop_if_done(_) ->
+    false.
