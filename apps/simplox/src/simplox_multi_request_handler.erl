@@ -22,6 +22,7 @@
 	 content_types_provided/2, 
 	 content_types_accepted/2,
 	 multirequest_handler/2,
+	 multirequest_base64_handler/2,	 
 	 html_resource/2,
 	 rest_terminate/2
 	]).
@@ -43,7 +44,9 @@ allowed_methods(Req, State) ->
 
 content_types_accepted(Req, State) ->
     {[
-     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_handler}
+     {<<"application/protobuf+vnd.simplox.multirequest">>, multirequest_handler}, % backwards compatibility
+     {<<"application/vnd.simplox.multirequest+protobuf">>, multirequest_handler}, % correct mime-type
+     {<<"application/vnd.simplox.multirequest.base64+protobuf">>, multirequest_base64_handler}
     ], Req, State}.
 
 content_types_provided(Req, State) ->
@@ -80,11 +83,20 @@ rest_terminate(_Req, _State) ->
 %%--------------------------------------------------------------------
 -spec multirequest_handler(request(), #state{}) -> {true | false, request(), #state{}}.
 multirequest_handler(Req, State) ->
-    {MediaType, Req1} = cowboy_req:meta(media_type, Req),
-    {ok, Body, Req2} = cowboy_req:body(Req1),
-    State1 = State#state{media_type=MediaType},
-    handle_multirequest(Req2, State1, simplox_multirequest_pb:decode(Body)).
+    {ok, Body, Req1} = cowboy_req:body(Req),
+    multirequest_handler(Body, Req1, State).
 
+multirequest_base64_handler(Req, State) ->
+    {ok, Body64, Req1} = cowboy_req:body(Req),
+    lager:debug("Body: ~s", [Body64]),
+    Body = base64:decode(Body64),
+    multirequest_handler(Body, Req1, State).
+    
+multirequest_handler(Body, Req, State) ->
+    {MediaType, Req1} = cowboy_req:meta(media_type, Req),
+    State1 = State#state{media_type=MediaType},
+    handle_multirequest(Req1, State1, simplox_multirequest_pb:decode(Body)).
+    
 
 %%--------------------------------------------------------------------
 %% @doc
