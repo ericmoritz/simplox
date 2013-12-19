@@ -29,7 +29,8 @@ init([Conf]) ->
 		 [
 		  {'_', [
 			 {"/simplox/v1/dummy/", simplox_dummy_handler, []},
-			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []}
+			 {"/simplox/v1/multi-request/", simplox_multi_request_handler, []},
+			 {"/loaderio-78ffdbf62df592d188c61b3131beb020", cowboy_static, {priv_file, simplox, "loaderio.txt"}}
 			]}
 		 ]),
     ClientSup = {http_client_sup, 
