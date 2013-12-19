@@ -27,6 +27,8 @@ backend_mod(_Conf) ->
 	    smartcache_dets_backend;
         ets->
 	    smartcache_ets_backend;
+	ironcache->
+	    smartcache_ironcache_backend;
 	_ ->
 	    undefined
     end.
@@ -39,12 +41,14 @@ backend_child_spec(Conf) ->
 	     {smartcache_dets_backend_sup, start_link, ["/tmp/smartcache.dets"]},
 	     permanent, 2000, supervisor, [smartcache_dets_backend_sup]}];
 	mcd ->
-	    Nodes = [
-		     ["127.0.0.1", 11211]
-		    ],
+	    {_, Nodes} = mcd_nodes(),
 	    [{smartcache_mcd_backend_sup,
 	     {smartcache_mcd_backend_sup, start_link, [Nodes, pool_props(Conf)]},
 	     permanent, 2000, supervisor, [smartcache_mcd_backend_sup]}];
+	ironcache ->
+	    [{smartcache_ironcache_backend_sup,
+	     {smartcache_ironcache_backend_sup, start_link, []},
+	     permanent, 2000, supervisor, [smartcache_ironcache_backend_sup]}];
 	ets ->
 	    [{smartcache_ets_backend_sup,
 	     {smartcache_ets_backend_sup, start_link, []},
@@ -58,6 +62,22 @@ pool_props(_Conf) ->
      {size, 10},
      {max_overflow, 10}
     ].
+
+mcd_nodes() ->
+    mcd_nodes(os:getenv("MCD_URL")).
+
+mcd_nodes(false) ->
+    {<<"simplox">>, 
+     [
+      ["127.0.0.1", 11211]
+     ]};
+mcd_nodes(URI) ->
+    % TODO: Support multiple URIs
+    {ok, {memcached, _, Host, Port, CacheName, _}} = http_uri:parse(URI),
+    {CacheName,
+     [
+      [Host, Port]
+     ]}.
 
 
 detect_backend() ->

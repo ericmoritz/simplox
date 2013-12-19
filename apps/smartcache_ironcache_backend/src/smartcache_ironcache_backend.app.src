@@ -1,0 +1,13 @@
+{application, smartcache_ironcache_backend,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+		  ssl,
+		  inets
+                 ]},
+  {env, []}
+ ]}.
